@@ -1,0 +1,10 @@
+Package: claudeR
+Title: Interact with the Anthropics Claude API
+Version: 0.0.0.9000
+Authors@R: 
+    person("Yamil", "Velez", , "yrv2004@columbia.edu", role = c("aut", "cre"))
+Description: The `claudeR` package provides a convenient way to interact with the Anthropics Claude API, which allows you to generate natural language responses to prompts using advanced machine learning models. With `claudeR`, you can easily generate responses using Anthropic's foundation models without having to worry about the underlying API requests.
+License: MIT
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
