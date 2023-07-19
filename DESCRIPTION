@@ -1,5 +1,5 @@
 Package: claudeR
-Title: Interact with the Anthropics Claude API
+Title: Interact with the Anthropic Claude API
 Version: 0.0.0.9000
 Authors@R: 
     person("Yamil", "Velez", , "yrv2004@columbia.edu", role = c("aut", "cre"))

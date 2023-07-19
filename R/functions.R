@@ -10,14 +10,14 @@
 #' @param top_p (Optional) Does nucleus sampling.
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
-claudeR <- function(prompt, model = "claude-v1", max_tokens, 
-                                 stop_sequences = '\n\nHuman: ', 
+claudeR <- function(prompt, model = "claude-2", max_tokens,
+                                 stop_sequences = '\n\nHuman: ',
                                  temperature = .7, top_k = -1, top_p = -1,
                                  api_key = NULL) {
   # Load required libraries
   library(httr)
   library(jsonlite)
-  
+
   # Check if the API key is provided or available in the environment
   if (is.null(api_key)) {
     api_key <- paste(Sys.getenv("ANTHROPIC_API_KEY"))
@@ -25,17 +25,17 @@ claudeR <- function(prompt, model = "claude-v1", max_tokens,
       stop("Please provide an API key or set it as the ANTHROPIC_API_KEY environment variable.")
     }
   }
-  
+
   # Set up the API request
   url <- "https://api.anthropic.com/v1/complete"
   headers <- add_headers(
     "X-API-Key" = api_key,
     "Content-Type" = "application/json"
   )
-  
+
   # Build the prompt with the User/Assistant convention
   prompt <- paste0("\n\nHuman: ", prompt, "\n\nAssistant: ")
-  
+
   body <- paste0('{
   "prompt": "', gsub("\n", "\\\\n", prompt), '",
   "model": "', model, '",
@@ -45,10 +45,10 @@ claudeR <- function(prompt, model = "claude-v1", max_tokens,
   "top_k": ', top_k, ',
   "top_p": ', top_p, '
 }')
-  
+
   # Send the API request
   response <- POST(url, headers, body = body)
-  
+
   # Check if the request was successful
   if (http_status(response)$category == "Success") {
     # Parse the JSON response
@@ -61,5 +61,5 @@ claudeR <- function(prompt, model = "claude-v1", max_tokens,
     cat("Error details:\n", content(response, "text", encoding = "UTF-8"), "\n")
     return(NULL)
   }
-  
+
 }

@@ -6,7 +6,7 @@
 \usage{
 claudeR(
   prompt,
-  model = "claude-v1",
+  model = "claude-2",
   max_tokens,
   stop_sequences = "\\n\\nHuman: ",
   temperature = 0.7,
