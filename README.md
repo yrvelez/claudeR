@@ -13,7 +13,7 @@ To use the package, load it and call the claudeR function:
 library(claudeR)
 
 response <- claudeR(prompt = "What is the capital of France?",
-                    model = "claude-v1",
+                    model = "claude-2",
                     max_tokens = 50,
                     api_key = "your_api_key_here")
 
