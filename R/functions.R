@@ -30,7 +30,8 @@ claudeR <- function(prompt, model = "claude-2", max_tokens,
   url <- "https://api.anthropic.com/v1/complete"
   headers <- add_headers(
     "X-API-Key" = api_key,
-    "Content-Type" = "application/json"
+    "Content-Type" = "application/json",
+    "anthropic-version" = "2023-06-01"
   )
 
   # Build the prompt with the User/Assistant convention
