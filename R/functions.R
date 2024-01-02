@@ -3,14 +3,14 @@
 #' @param api_key Your API key for authentication.
 #' @param prompt The prompt you want Claude to complete.
 #' @param model The model to use for the request.
-#' @param max_tokens A maximum number of tokens to generate before stopping.
+#' @param max_tokens A maximum number of tokens to generate before stopping. Default = 100.
 #' @param stop_sequences (Optional) A list of strings upon which to stop generating.
 #' @param temperature (Optional) Amount of randomness injected into the response.
 #' @param top_k (Optional) Only sample from the top K options for each subsequent token.
 #' @param top_p (Optional) Does nucleus sampling.
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
-claudeR <- function(prompt, model = "claude-2", max_tokens,
+claudeR <- function(prompt, model = "claude-2.1", max_tokens = 100,
                                  stop_sequences = '\n\nHuman: ',
                                  temperature = .7, top_k = -1, top_p = -1,
                                  api_key = NULL) {
