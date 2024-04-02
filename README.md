@@ -12,14 +12,22 @@ To use the package, load it and call the claudeR function:
 
 library(claudeR)
 
+Claude 2 Example:
+
 response <- claudeR(prompt = "What is the capital of France?",
                     model = "claude-2",
                     max_tokens = 50,
                     api_key = "your_api_key_here")
 
 cat(response)
+
+Claude 3 Example:
+response <- claudeR(prompt = list(list(role = "user", content = "What is the capital of France?")),
+                    model = "claude-3-opus-20240229",
+                    max_tokens = 50,
+                    api_key = "your_api_key_here")
                     
-Replace "your_api_key_here" with your Anthropics API key. 
+Replace "your_api_key_here" with your Anthropic's API key. 
 You can also set it as an environment variable using sys.setenv(ANTHROPIC_API_KEY = {Your API KEY here})
 
 # Parameters
