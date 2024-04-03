@@ -13,7 +13,7 @@
 claudeR <- function(prompt, model = "claude-3-opus-20240229", max_tokens = 100,
                     stop_sequences = NULL,
                     temperature = .7, top_k = -1, top_p = -1,
-                    api_key = NULL) {
+                    api_key = NULL, system_prompt = NULL) {
 
   # Load required libraries
   library(httr)
@@ -89,15 +89,24 @@ claudeR <- function(prompt, model = "claude-3-opus-20240229", max_tokens = 100,
     list(role = msg$role, content = msg$content)
   })
 
-  # Construct the body of the request
-  body <- toJSON(list(
+  # Prepare the request body as a list
+  request_body_list <- list(
     model = model,
     max_tokens = max_tokens,
     temperature = temperature,
     top_k = top_k,
     top_p = top_p,
     messages = message_list
-  ), auto_unbox = TRUE)
+    )
+
+  # Include the system prompt if provided
+  if (!is.null(system_prompt)) {
+    request_body_list$system = list(prompt = system_prompt)
+  }
+
+  # Convert the modified list to JSON
+  body <- toJSON(request_body_list, auto_unbox = TRUE)
+  
 
   # Send the API request
   response <- POST(url, headers, body = body)
