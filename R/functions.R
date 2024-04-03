@@ -102,7 +102,7 @@ claudeR <- function(prompt, model = "claude-3-opus-20240229", max_tokens = 100,
 
   # Include the system prompt if provided
   if (!is.null(system_prompt)) {
-    request_body_list$system = list(prompt = system_prompt)
+    request_body_list$system = system_prompt
   }
 
   # Convert the modified list to JSON
