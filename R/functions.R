@@ -8,6 +8,7 @@
 #' @param temperature (Optional) Amount of randomness injected into the response.
 #' @param top_k (Optional) Only sample from the top K options for each subsequent token.
 #' @param top_p (Optional) Does nucleus sampling.
+#' @param system_prompt (Optional) An optional system role specification.
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
 claudeR <- function(prompt, model = "claude-3-opus-20240229", max_tokens = 100,
