@@ -11,7 +11,7 @@
 #' @param system_prompt (Optional) An optional system role specification.
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
-claudeR <- function(prompt, model = "claude-3-opus-20240229", max_tokens = 100,
+claudeR <- function(prompt, model = "claude-3-5-sonnet-20240620", max_tokens = 100,
                     stop_sequences = NULL,
                     temperature = .7, top_k = -1, top_p = -1,
                     api_key = NULL, system_prompt = NULL) {
