@@ -31,7 +31,7 @@ response <- claudeR(prompt = list(list(role = "user", content = "What is the cap
 cat(response)
                     
 Replace "your_api_key_here" with your Anthropic's API key. 
-You can also set it as an environment variable using sys.setenv(ANTHROPIC_API_KEY = {Your API KEY here})
+You can also set it as an environment variable using Sys.setenv(ANTHROPIC_API_KEY = {Your API KEY here})
 
 # Parameters
 The claudeR function accepts the following parameters:
