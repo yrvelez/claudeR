@@ -61,7 +61,7 @@ result <- claudeR(
   prompt = list(list(role = "user", content = "Solve this math problem: If f(x) = 2x² + 3x - 5, find all values of x where f(x) = 20")),
   model = "claude-3-7-sonnet-20250219",
   thinking = list(type = "enabled", budget_tokens = 2000),
-  show_thinking = TRUE
+  return_thinking = TRUE
 )
 
 # Access thinking and response separately
@@ -84,14 +84,14 @@ cat("Final answer:\n", result$response)
 | `system_prompt` | Optional system instructions for Claude 3 models. |
 | `thinking` | For Claude 3.7: A list with `type="enabled"` and `budget_tokens` to activate extended thinking. |
 | `stream_thinking` | Whether to stream the response in real-time. Default: `TRUE`. |
-| `show_thinking` | Whether to return thinking output. Default: `FALSE`. |
+| `return_thinking` | Whether to return thinking output. Default: `FALSE`. |
 
 ## Extended Thinking Mode
 
 Claude 3.7 features an advanced extended thinking mode that helps the model solve complex reasoning problems more effectively. To use this feature:
 
 1. Set `thinking = list(type = "enabled", budget_tokens = N)` where N is the token budget for thinking
-2. Set `show_thinking = TRUE` to see the thinking process
+2. Set `return_thinking = TRUE` to see the thinking process
 3. When using extended thinking, the following constraints apply:
    - `temperature` must be set to exactly 1 (handled automatically)
    - `top_p` and `top_k` parameters are disabled (handled automatically)
@@ -105,7 +105,7 @@ result <- claudeR(
   model = "claude-3-7-sonnet-20250219",
   thinking = list(type = "enabled", budget_tokens = 3000),
   max_tokens = 4000,
-  show_thinking = TRUE
+  return_thinking = TRUE
 )
 ```
 
