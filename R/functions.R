@@ -11,7 +11,7 @@
 #' @param system_prompt (Optional) An optional system role specification.
 #' @param thinking (Optional) A list with type="enabled" and budget_tokens to enable Claude's thinking mode.
 #' @param stream_thinking (Optional) Whether to stream thinking output in real-time. Default is TRUE.
-#' @param show_thinking (Optional) Whether to include thinking output in the final response. Default is FALSE.
+#' @param return_thinking (Optional) Whether to include thinking output in the final response. Default is FALSE.
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
 claudeR <- function(prompt, 
@@ -25,7 +25,7 @@ claudeR <- function(prompt,
                     system_prompt = NULL,
                     thinking = NULL, 
                     stream_thinking = TRUE, 
-                    show_thinking = FALSE) {
+                    return_thinking = FALSE) {
   
   # Check API key: use provided or environment variable
   if (is.null(api_key)) {
@@ -86,7 +86,7 @@ claudeR <- function(prompt,
               response_text <- c(response_text, block)
             }
           }
-          if (show_thinking) {
+          if (return_thinking) {
             return(list(thinking = thinking_text, response = response_text))
           } else {
             return(response_text[1])
@@ -276,7 +276,7 @@ claudeR <- function(prompt,
       curl_fetch_stream(url, callback, handle = h)
       
       # Return the accumulated content
-      if (show_thinking) {
+      if (return_thinking) {
         return(list(thinking = thinking_content, response = response_content))
       } else {
         return(response_content)
@@ -302,7 +302,7 @@ claudeR <- function(prompt,
             }
           }
           
-          if (show_thinking) {
+          if (return_thinking) {
             return(list(thinking = thinking_text, response = response_text))
           } else {
             return(response_text)
