@@ -6,19 +6,23 @@
 \usage{
 claudeR(
   prompt,
-  model = "claude-2",
-  max_tokens,
-  stop_sequences = "\\n\\nHuman: ",
+  model = "claude-3-7-sonnet-20250219",
+  max_tokens = 100,
+  stop_sequences = NULL,
   temperature = 0.7,
   top_k = -1,
   top_p = -1,
-  api_key = NULL
+  api_key = NULL,
+  system_prompt = NULL,
+  thinking = NULL,
+  stream_thinking = TRUE,
+  return_thinking = FALSE
 )
 }
 \arguments{
-\item{prompt}{The prompt you want Claude to complete.}
+\item{prompt}{A string vector for Claude-2, or a list for Claude-3 specifying the input for the model.}
 
-\item{model}{The model to use for the request.}
+\item{model}{The model to use for the request. Default is the latest Claude-3 model.}
 
 \item{max_tokens}{A maximum number of tokens to generate before stopping.}
 
@@ -31,6 +35,14 @@ claudeR(
 \item{top_p}{(Optional) Does nucleus sampling.}
 
 \item{api_key}{Your API key for authentication.}
+
+\item{system_prompt}{(Optional) An optional system role specification.}
+
+\item{thinking}{(Optional) A list with type="enabled" and budget_tokens to enable Claude's thinking mode.}
+
+\item{stream_thinking}{(Optional) Whether to stream thinking output in real-time. Default is TRUE.}
+
+\item{return_thinking}{(Optional) Whether to include thinking output in the final response. Default is FALSE.}
 }
 \value{
 The resulting completion up to and excluding the stop sequences.
