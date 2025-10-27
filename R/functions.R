@@ -13,8 +13,8 @@
 #' @title Interact with the Anthropics Claude API
 #'
 #' @param api_key Your API key for authentication.
-#' @param prompt A string vector for Claude-2, or a list for Claude-3 specifying the input for the model.
-#' @param model The model to use for the request. Default is the latest Claude-3 model.
+#' @param prompt A string vector for Claude-2, or a list for Claude-3/4 specifying the input for the model.
+#' @param model The model to use for the request. Default is Claude Sonnet 4.5 (claude-sonnet-4-5-20250929).
 #' @param max_tokens A maximum number of tokens to generate before stopping.
 #' @param stop_sequences (Optional) A list of strings upon which to stop generating.
 #' @param temperature (Optional) Amount of randomness injected into the response.
@@ -27,7 +27,7 @@
 #' @return The resulting completion up to and excluding the stop sequences.
 #' @export
 claudeR <- function(prompt,
-                    model = "claude-3-7-sonnet-20250219",
+                    model = "claude-sonnet-4-5-20250929",
                     max_tokens = 100,
                     stop_sequences = NULL,
                     temperature = 0.7,
@@ -47,9 +47,9 @@ claudeR <- function(prompt,
     }
   }
 
-  # For Claude-3 the prompt must be a list of messages.
-  if (grepl("claude-3", model) && !is.list(prompt)) {
-    stop("Claude-3 requires the input in a list format, e.g., list(list(role = \"user\", content = \"Your question here\"))")
+  # For Claude-3 and newer models the prompt must be a list of messages.
+  if (!grepl("claude-2", model) && !is.list(prompt)) {
+    stop("Claude-3 and newer models require the input in a list format, e.g., list(list(role = \"user\", content = \"Your question here\"))")
   }
 
   # Set up the API request based on the model type.
@@ -113,7 +113,7 @@ claudeR <- function(prompt,
     }
 
   } else {
-    # --- CLAUDE-3 branch with extended thinking support ---
+    # --- CLAUDE-3/4 branch with extended thinking support ---
     url <- "https://api.anthropic.com/v1/messages"
 
     # Build the messages list.
