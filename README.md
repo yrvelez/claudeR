@@ -1,6 +1,6 @@
 # claudeR: R Interface to Anthropic's Claude API
 
-This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2 and the Claude 3 family. The latest version adds support for Claude 3.7's extended thinking capabilities, allowing for more thorough reasoning and complex problem-solving.
+This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2, Claude 3 family, Claude 3.7 with extended thinking capabilities, and the latest Claude 4.5 models. The package defaults to Claude 4.5 Sonnet, providing state-of-the-art performance for a wide range of tasks.
 
 ## Installation
 
@@ -69,12 +69,28 @@ cat("Thinking process:\n", result$thinking, "\n\n")
 cat("Final answer:\n", result$response)
 ```
 
+### Claude 4.5
+
+Claude 4.5 represents the latest generation of models with enhanced capabilities and performance. The package now defaults to Claude 4.5 Sonnet:
+
+```r
+response <- claudeR(
+  prompt = list(list(role = "user", content = "Explain quantum entanglement in simple terms")),
+  model = "claude-sonnet-4-5-20250929",
+  max_tokens = 200
+)
+
+cat(response)
+```
+
+Claude 4.5 uses the same message format as Claude 3, making it easy to upgrade existing code. Simply specify the Claude 4.5 model name, or omit the `model` parameter to use the default Claude 4.5 Sonnet model.
+
 ## Function Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| `prompt` | For Claude 2: A string with the prompt text. For Claude 3: A list of message objects with `role` and `content` fields. |
-| `model` | The model to use. Default: `"claude-3-7-sonnet-20250219"`. |
+| `prompt` | For Claude 2: A string with the prompt text. For Claude 3/4: A list of message objects with `role` and `content` fields. |
+| `model` | The model to use. Default: `"claude-sonnet-4-5-20250929"`. |
 | `max_tokens` | Maximum number of tokens to generate. Default: `100`. |
 | `stop_sequences` | A list of strings upon which to stop generating. |
 | `temperature` | Controls randomness (0-1). Default: `0.7`. Must be exactly `1` when using extended thinking. |
