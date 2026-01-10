@@ -1,2 +1,12 @@
 ^claudeR\.Rproj$
 ^\.Rproj\.user$
+^\.git$
+^\.github$
+^\.gitignore$
+^README\.Rmd$
+^LICENSE\.md$
+^\.Rhistory$
+^\.RData$
+^\.DS_Store$
+^cran-comments\.md$
+^CRAN-SUBMISSION$

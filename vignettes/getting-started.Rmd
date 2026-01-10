@@ -1,0 +1,153 @@
+---
+title: "Getting Started with claudeR"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with claudeR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+The claudeR package provides a convenient R interface to the Anthropic Claude API.
+With claudeR, you can easily generate AI-powered text responses using Claude's
+advanced language models without managing the underlying API request details.
+
+## Prerequisites
+
+Before using claudeR, you need:
+
+1. An Anthropic API key (get one at <https://console.anthropic.com/>)
+2. The API key set as an environment variable
+
+### Setting your API key
+
+The recommended way to set your API key is via an environment variable:
+
+```{r}
+Sys.setenv(ANTHROPIC_API_KEY = "your-api-key-here")
+```
+
+For persistent use, add this to your `.Renviron` file:
+
+```
+ANTHROPIC_API_KEY=your-api-key-here
+```
+
+## Basic Usage
+
+Load the package:
+
+```{r setup}
+library(claudeR)
+```
+
+### Simple Query
+
+For Claude 3 and newer models, prompts must be provided as a list of messages:
+```{r}
+response <- claudeR(
+  prompt = list(list(role = "user", content = "What is the capital of France?")),
+  model = "claude-sonnet-4-5-20250929",
+  max_tokens = 100
+)
+print(response)
+```
+
+### Using a System Prompt
+
+You can provide context or instructions using a system prompt:
+
+```{r}
+response <- claudeR(
+  prompt = list(list(role = "user", content = "Translate: Hello, how are you?")),
+  model = "claude-sonnet-4-5-20250929",
+  system_prompt = "You are a Spanish translator. Respond only with the translation.",
+  max_tokens = 100
+)
+print(response)
+```
+
+### Multi-turn Conversations
+
+Build a conversation by including multiple messages:
+
+```{r}
+response <- claudeR(
+  prompt = list(
+    list(role = "user", content = "My name is Alice."),
+    list(role = "assistant", content = "Hello Alice! Nice to meet you."),
+    list(role = "user", content = "What's my name?")
+  ),
+  model = "claude-sonnet-4-5-20250929",
+  max_tokens = 100
+)
+print(response)
+```
+
+## Extended Thinking Mode
+
+Claude supports an extended thinking mode where it can "think through" complex
+problems step by step before providing a response:
+
+```{r}
+response <- claudeR(
+  prompt = list(list(role = "user", content = "Solve: What is 127 * 83?")),
+  model = "claude-sonnet-4-5-20250929",
+  max_tokens = 8000,
+  thinking = list(type = "enabled", budget_tokens = 5000),
+  return_thinking = TRUE
+)
+
+# View the thinking process
+cat("Thinking:\n", response$thinking, "\n\n")
+
+# View the final answer
+cat("Response:\n", response$response)
+```
+
+## Available Models
+
+claudeR supports multiple Claude model families:
+
+- **Claude 4.5**: `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- **Claude 3.5**: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- **Claude 3**: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
+- **Claude 2** (legacy): `claude-2.1`, `claude-2.0`
+
+## Parameters
+
+Key parameters for the `claudeR()` function:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `prompt` | List of messages (Claude 3+) or string (Claude 2) | Required |
+| `model` | Model identifier | `"claude-sonnet-4-5-20250929"` |
+| `max_tokens` | Maximum tokens in response | `100` |
+| `temperature` | Randomness (0-1) | `0.7` |
+| `system_prompt` | System instructions | `NULL` |
+| `thinking` | Enable extended thinking | `NULL` |
+| `stream_thinking` | Stream output in real-time | `TRUE` |
+| `return_thinking` | Include thinking in output | `FALSE` |
+
+## Error Handling
+
+If the API request fails, claudeR will return `NULL` and display a warning with
+error details. Common issues include:
+
+- Invalid or missing API key
+- Exceeded rate limits
+- Invalid model name
+- Malformed prompt format
+
+## Further Resources
+
+- [Anthropic API Documentation](https://docs.anthropic.com/)
+- [claudeR GitHub Repository](https://github.com/yrvelez/claudeR)
