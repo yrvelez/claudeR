@@ -83,10 +83,13 @@ Claude 4.5 represents the latest generation of models with enhanced capabilities
 response <- claudeR(
   prompt = list(list(role = "user", content = "Explain quantum entanglement in simple terms")),
   model = "claude-sonnet-4-5-20250929",
-  max_tokens = 200
+  thinking = list(type = "enabled", budget_tokens = 2000),
+  return_thinking = TRUE
 )
 
-cat(response)
+# Access thinking and response separately
+cat("Thinking process:\n", result$thinking, "\n\n")
+cat("Final answer:\n", result$response)
 ```
 
 #### Claude 4.5 Opus
@@ -97,10 +100,13 @@ Use Opus 4.5 for the most demanding tasks requiring maximum intelligence:
 response <- claudeR(
   prompt = list(list(role = "user", content = "Analyze this complex algorithm and suggest optimizations")),
   model = "claude-opus-4-5-20251101",
-  max_tokens = 500
+  thinking = list(type = "enabled", budget_tokens = 2000),
+  return_thinking = TRUE
 )
 
-cat(response)
+# Access thinking and response separately
+cat("Thinking process:\n", result$thinking, "\n\n")
+cat("Final answer:\n", result$response)
 ```
 
 #### Claude 4.5 Haiku
@@ -111,10 +117,13 @@ Use Haiku 4.5 for fast, cost-efficient responses:
 response <- claudeR(
   prompt = list(list(role = "user", content = "Summarize the key points of this text")),
   model = "claude-haiku-4-5-20251001",
-  max_tokens = 150
+  thinking = list(type = "enabled", budget_tokens = 2000),
+  return_thinking = TRUE
 )
 
-cat(response)
+# Access thinking and response separately
+cat("Thinking process:\n", result$thinking, "\n\n")
+cat("Final answer:\n", result$response)
 ```
 
 Claude 4.5 uses the same message format as Claude 3, making it easy to upgrade existing code. Simply specify the Claude 4.5 model name, or omit the `model` parameter to use the default Claude 4.5 Sonnet model.
