@@ -822,15 +822,37 @@ claude_code_print <- function(response, width = 80) {
 #' Interactive Claude Code chat
 #'
 #' Start an interactive chat session with Claude Code in the R console.
+#' Supports conversation history, code execution with user approval,
+#' and multi-turn conversations.
 #'
 #' @param system_prompt Optional system prompt.
 #' @param working_dir Working directory.
+#' @param allow_code_execution Logical; if TRUE, allows executing R code with user approval.
 #'
-#' @return Invisibly returns conversation history.
+#' @return Invisibly returns conversation history as a list.
+#'
+#' @details
+#' The chat session maintains full conversation history which is passed to Claude
+#' on each turn, enabling context-aware multi-turn conversations.
+#'
+#' When \code{allow_code_execution = TRUE}, the session will detect R code blocks
+#' in Claude's responses and prompt for execution approval. Users can type:
+#' \itemize{
+#'   \item 'y' or 'yes' - Execute all pending code
+#'   \item 'n' or 'no' - Skip code execution
+#'   \item A number (e.g., '1') - Execute only that code block
+#' }
+#'
+#' Available commands during chat:
+#' \itemize{
+#'   \item 'exit' or 'quit' - End the session
+#'   \item 'clear' - Clear conversation history
+#'   \item 'history' - Show conversation history
+#' }
 #'
 #' @family claude_code
 #' @export
-claude_code_chat <- function(system_prompt = NULL, working_dir = NULL) {
+claude_code_chat <- function(system_prompt = NULL, working_dir = NULL, allow_code_execution = TRUE) {
   if (!interactive()) stop("claude_code_chat() requires an interactive R session", call. = FALSE)
 
   cat("\n")
@@ -841,11 +863,15 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL) {
   cat("\n")
   .cc_ln(.cc_item("Type your message and press Enter"))
   .cc_ln(.cc_item("Commands: 'exit', 'clear', 'history'"))
+  if (allow_code_execution) {
+    .cc_ln(.cc_item("Code execution: enabled (will prompt for approval)"))
+  }
   cat("\n")
   .cc_ln(strrep("\u2500", 60))
   cat("\n")
 
-  history <- character(0)
+  # Store history as list of list(role, content) for better structure
+  history <- list()
 
   repeat {
     prompt <- readline("You \u203A ")
@@ -856,7 +882,7 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL) {
     }
 
     if (tolower(prompt) == "clear") {
-      history <- character(0)
+      history <- list()
       .cc_ln(.cc_success("History cleared")); cat("\n")
       next
     }
@@ -866,7 +892,18 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL) {
         .cc_ln(.cc_info("No history yet"))
       } else {
         cat("\n"); .cc_ln(.cc_header("Conversation History")); cat("\n")
-        cat(paste(history, collapse = "\n\n")); cat("\n")
+        for (i in seq_along(history)) {
+          entry <- history[[i]]
+          role_label <- if (entry$role == "user") "You" else "Claude"
+          cat(sprintf("[%d] %s:\n", i, role_label))
+          # Truncate long messages for display
+          content_preview <- if (nchar(entry$content) > 500) {
+            paste0(substr(entry$content, 1, 500), "\n... (truncated)")
+          } else {
+            entry$content
+          }
+          cat(content_preview, "\n\n")
+        }
       }
       cat("\n")
       next
@@ -876,17 +913,226 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL) {
 
     cat("\n"); .cc_ln(.cc_info("Thinking..."))
 
+    # Build full prompt with conversation history context
+    full_prompt <- .cc_build_context_prompt(history, prompt, working_dir)
+
+    # Build system prompt - add code execution instructions if enabled
+    effective_system_prompt <- system_prompt
+    if (allow_code_execution) {
+      code_exec_prompt <- .cc_code_execution_system_prompt()
+      effective_system_prompt <- if (is.null(system_prompt)) {
+        code_exec_prompt
+      } else {
+        paste0(system_prompt, "\n\n", code_exec_prompt)
+      }
+    }
+
     response <- tryCatch(
-      claude_code(prompt, system_prompt = system_prompt, working_dir = working_dir),
+      claude_code(full_prompt, system_prompt = effective_system_prompt, working_dir = working_dir),
       error = function(e) paste(.cc_error("Error:"), e$message)
     )
 
     cat("\n"); .cc_ln("Claude \u203A"); cat("\n")
     cat(response); cat("\n\n")
-    .cc_ln(strrep("\u2500", 60)); cat("\n")
 
-    history <- c(history, paste0("You: ", prompt), paste0("Claude: ", response))
+    # Update history
+    history <- append(history, list(list(role = "user", content = prompt)))
+    history <- append(history, list(list(role = "assistant", content = response)))
+
+    # Check for executable R code and handle execution
+    if (allow_code_execution) {
+      code_blocks <- .cc_extract_r_code(response)
+      if (length(code_blocks) > 0) {
+        .cc_handle_code_execution(code_blocks)
+      }
+    }
+
+    .cc_ln(strrep("\u2500", 60)); cat("\n")
   }
 
   invisible(history)
+}
+
+# Default system prompt for code execution mode
+.cc_code_execution_system_prompt <- function() {
+  paste0(
+    "You are an R coding assistant. When the user asks you to execute or run code, ",
+    "perform analysis, or complete tasks that require R code execution:\n\n",
+    "1. Output the R code in fenced code blocks with ```r marker\n",
+    "2. The user's R session can execute these code blocks with their approval\n",
+    "3. Be explicit about what each code block does\n",
+    "4. For multi-step operations, output separate code blocks for each step\n\n",
+    "Examples of properly formatted executable code:\n",
+    "```r\n",
+    "# Load and process data\n",
+    "df <- read.csv('data.csv')\n",
+    "summary(df)\n",
+    "```\n\n",
+    "```r\n",
+    "# Render R Markdown\n",
+    "rmarkdown::render('analysis.Rmd')\n",
+    "```\n\n",
+    "Always provide complete, runnable R code that the user can execute directly."
+  )
+}
+
+# Helper: Build prompt with conversation context
+.cc_build_context_prompt <- function(history, current_prompt, working_dir) {
+  if (length(history) == 0) {
+    # First message - add working directory context
+    context <- sprintf(
+      "You are an R coding assistant working in directory: %s\n\n%s",
+      working_dir %||% getwd(),
+      current_prompt
+    )
+    return(context)
+  }
+
+  # Build conversation context
+  context_parts <- c(
+    sprintf("Working directory: %s", working_dir %||% getwd()),
+    "",
+    "Previous conversation:",
+    "---"
+  )
+
+  for (entry in history) {
+    role_label <- if (entry$role == "user") "User" else "Assistant"
+    # Limit history entries to prevent overly long prompts
+    content <- if (nchar(entry$content) > 2000) {
+      paste0(substr(entry$content, 1, 2000), "\n[... truncated ...]")
+    } else {
+      entry$content
+    }
+    context_parts <- c(context_parts, sprintf("%s: %s", role_label, content), "")
+  }
+
+  context_parts <- c(
+    context_parts,
+    "---",
+    "",
+    "Current user message:",
+    current_prompt
+  )
+
+  paste(context_parts, collapse = "\n")
+}
+
+# Helper: Extract R code blocks from response
+.cc_extract_r_code <- function(response) {
+  # Match ```r or ```R code blocks
+  pattern <- "```[rR]\\s*\\n([\\s\\S]*?)```"
+  matches <- gregexpr(pattern, response, perl = TRUE)
+  blocks <- regmatches(response, matches)[[1]]
+
+  if (length(blocks) == 0) return(character(0))
+
+  # Extract just the code content
+  code_blocks <- sapply(blocks, function(block) {
+    lines <- strsplit(block, "\n")[[1]]
+    # Remove first line (```r) and last line (```)
+    code_lines <- lines[-c(1, length(lines))]
+    paste(code_lines, collapse = "\n")
+  }, USE.NAMES = FALSE)
+
+  code_blocks
+}
+
+# Helper: Handle code execution with user approval
+.cc_handle_code_execution <- function(code_blocks) {
+  n <- length(code_blocks)
+
+  cat("\n")
+  .cc_ln(.cc_header("Executable R Code Detected"))
+  cat("\n")
+
+  # Display code blocks with numbers
+
+for (i in seq_along(code_blocks)) {
+    .cc_ln(sprintf("  [%d] Code block:", i))
+    code_preview <- if (nchar(code_blocks[i]) > 200) {
+      paste0(substr(code_blocks[i], 1, 200), "\n      ... (truncated)")
+    } else {
+      code_blocks[i]
+    }
+    # Indent code for display
+    indented <- gsub("\n", "\n      ", code_preview)
+    cat(sprintf("      %s\n\n", indented))
+  }
+
+  .cc_ln(sprintf("Execute code? [y/n/1-%d]: ", n))
+  choice <- tolower(trimws(readline("  \u203A ")))
+
+  if (choice %in% c("y", "yes", "all")) {
+    # Execute all code blocks
+    for (i in seq_along(code_blocks)) {
+      .cc_execute_code_block(code_blocks[i], i)
+    }
+  } else if (choice %in% c("n", "no", "")) {
+    .cc_ln(.cc_info("Code execution skipped"))
+  } else if (grepl("^[0-9]+$", choice)) {
+    idx <- as.integer(choice)
+    if (idx >= 1 && idx <= n) {
+      .cc_execute_code_block(code_blocks[idx], idx)
+    } else {
+      .cc_ln(.cc_warn(sprintf("Invalid block number. Choose 1-%d", n)))
+    }
+  } else {
+    .cc_ln(.cc_warn("Invalid choice. Code execution skipped."))
+  }
+
+  cat("\n")
+}
+
+# Helper: Execute a single code block with error handling
+.cc_execute_code_block <- function(code, block_num) {
+  cat("\n")
+  .cc_ln(.cc_info(sprintf("Executing block %d...", block_num)))
+  cat("\n")
+
+  result <- tryCatch({
+    # Capture output
+    output <- capture.output({
+      eval_result <- eval(parse(text = code), envir = globalenv())
+    }, type = "output")
+
+    list(
+      success = TRUE,
+      output = paste(output, collapse = "\n"),
+      result = eval_result
+    )
+  }, error = function(e) {
+    list(
+      success = FALSE,
+      error = e$message
+    )
+  }, warning = function(w) {
+    list(
+      success = TRUE,
+      warning = w$message
+    )
+  })
+
+  if (result$success) {
+    .cc_ln(.cc_success(sprintf("Block %d executed successfully", block_num)))
+    if (nzchar(result$output)) {
+      cat("\n  Output:\n")
+      # Indent output
+      indented_output <- gsub("\n", "\n  ", result$output)
+      cat(sprintf("  %s\n", indented_output))
+    }
+    if (!is.null(result$result) && !identical(result$result, invisible())) {
+      # Show result if it's something meaningful
+      if (is.data.frame(result$result)) {
+        cat("\n  Result: data.frame with", nrow(result$result), "rows,", ncol(result$result), "columns\n")
+      } else if (length(result$result) <= 10 && !is.function(result$result)) {
+        cat("\n  Result:", utils::capture.output(print(result$result))[1], "\n")
+      }
+    }
+    if (!is.null(result$warning)) {
+      .cc_ln(.cc_warn(paste("Warning:", result$warning)))
+    }
+  } else {
+    .cc_ln(.cc_error(sprintf("Block %d failed: %s", block_num, result$error)))
+  }
 }
