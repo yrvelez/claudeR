@@ -7,8 +7,11 @@ Authors@R:
 Description: A convenient interface to the Anthropic Claude API for generating
     natural language responses using advanced machine learning models. Supports
     Claude 2, Claude 3, and Claude 4 model families including features like
-    extended thinking mode and streaming responses. Allows users to easily
-    generate AI-powered text completions without managing API request details.
+    extended thinking mode and streaming responses. Also provides integration
+    with the Claude Code CLI for agentic coding workflows including file
+    operations, code execution, and multi-turn interactions. Allows users to
+    easily generate AI-powered text completions without managing API request
+    details.
 License: MIT + file LICENSE
 URL: https://github.com/yrvelez/claudeR
 BugReports: https://github.com/yrvelez/claudeR/issues
@@ -21,7 +24,9 @@ Imports:
 Suggests:
     testthat (>= 3.0.0),
     knitr,
-    rmarkdown
+    rmarkdown,
+    processx,
+    future.apply
 Config/testthat/edition: 3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
