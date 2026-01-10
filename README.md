@@ -48,6 +48,13 @@ response <- claudeR(
  max_tokens = 200
 )
 
+# Use a different model
+response <- claudeR(
+ prompt = list(list(role = "user", content = "Explain tibbles in R")),
+ model = "claude-opus-4-5-20251101",
+ max_tokens = 200
+)
+
 # With system prompt
 response <- claudeR(
  prompt = list(list(role = "user", content = "Review this code: x <- c(1,2,NA); mean(x)")),
