@@ -1,6 +1,6 @@
 # claudeR: R Interface to Anthropic's Claude API
 
-This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2, Claude 3 family, Claude 3.7 with extended thinking capabilities, and the latest Claude 4.5 models. The package defaults to Claude 4.5 Sonnet, providing state-of-the-art performance for a wide range of tasks.
+This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2, Claude 3 family, Claude 3.7 with extended thinking capabilities, and the latest Claude 4.5 models (Sonnet, Opus, and Haiku). The package defaults to Claude 4.5 Sonnet, providing state-of-the-art performance for a wide range of tasks.
 
 ## Installation
 
@@ -71,13 +71,47 @@ cat("Final answer:\n", result$response)
 
 ### Claude 4.5
 
-Claude 4.5 represents the latest generation of models with enhanced capabilities and performance. The package now defaults to Claude 4.5 Sonnet:
+Claude 4.5 represents the latest generation of models with enhanced capabilities and performance. The family includes three tiers:
+
+- **Claude Opus 4.5** (`claude-opus-4-5-20251101`): The most intelligent model with maximum capability for complex reasoning, coding, and problem-solving
+- **Claude Sonnet 4.5** (`claude-sonnet-4-5-20250929`): Balanced performance and speed (default)
+- **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`): Fastest and most efficient, matching Sonnet 4 performance at lower cost
+
+#### Claude 4.5 Sonnet (Default)
 
 ```r
 response <- claudeR(
   prompt = list(list(role = "user", content = "Explain quantum entanglement in simple terms")),
   model = "claude-sonnet-4-5-20250929",
   max_tokens = 200
+)
+
+cat(response)
+```
+
+#### Claude 4.5 Opus
+
+Use Opus 4.5 for the most demanding tasks requiring maximum intelligence:
+
+```r
+response <- claudeR(
+  prompt = list(list(role = "user", content = "Analyze this complex algorithm and suggest optimizations")),
+  model = "claude-opus-4-5-20251101",
+  max_tokens = 500
+)
+
+cat(response)
+```
+
+#### Claude 4.5 Haiku
+
+Use Haiku 4.5 for fast, cost-efficient responses:
+
+```r
+response <- claudeR(
+  prompt = list(list(role = "user", content = "Summarize the key points of this text")),
+  model = "claude-haiku-4-5-20251001",
+  max_tokens = 150
 )
 
 cat(response)

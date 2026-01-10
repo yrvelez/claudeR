@@ -15,6 +15,7 @@
 #' @param api_key Your API key for authentication.
 #' @param prompt A string vector for Claude-2, or a list for Claude-3/4 specifying the input for the model.
 #' @param model The model to use for the request. Default is Claude Sonnet 4.5 (claude-sonnet-4-5-20250929).
+#'   Available Claude 4.5 models: claude-opus-4-5-20251101, claude-sonnet-4-5-20250929, claude-haiku-4-5-20251001.
 #' @param max_tokens A maximum number of tokens to generate before stopping.
 #' @param stop_sequences (Optional) A list of strings upon which to stop generating.
 #' @param temperature (Optional) Amount of randomness injected into the response.
