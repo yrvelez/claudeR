@@ -1,6 +1,6 @@
 # claudeR: R Interface to Anthropic's Claude API
 
-First Commit: April 29, 2023
+**First Commit: April 29, 2023**
 
 This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2, Claude 3 family, Claude 3.7 with extended thinking capabilities, and the latest Claude 4.5 models (Sonnet, Opus, and Haiku). The package defaults to Claude 4.5 Sonnet, providing state-of-the-art performance for a wide range of tasks.
 
