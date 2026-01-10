@@ -1,180 +1,224 @@
-# claudeR: R Interface to Anthropic's Claude API
+# claudeR: R Interface to Anthropic's Claude
 
 **First Commit: April 29, 2023**
 
-This package provides a comprehensive R interface to Anthropic's Claude AI models, including Claude 2, Claude 3 family, Claude 3.7 with extended thinking capabilities, and the latest Claude 4.5 models (Sonnet, Opus, and Haiku). The package defaults to Claude 4.5 Sonnet, providing state-of-the-art performance for a wide range of tasks.
+This package provides two ways to interact with Claude from R:
+
+1. **API Interface** (`claudeR`) - Direct API calls for text completions with streaming and extended thinking support
+2. **CLI Interface** (`claude_code`) - Integration with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Anthropic's agentic coding CLI for file operations, code execution, and multi-turn interactions
+
+Supports Claude 2, Claude 3, Claude 3.7, and Claude 4.5 models (Sonnet, Opus, Haiku). Defaults to Claude 4.5 Sonnet.
 
 ## Installation
 
-You can install this package from GitHub using the devtools package:
-
 ```r
-# Install devtools if you haven't already
-install.packages("devtools")
-
-# Install claudeR
+# Install from GitHub
 devtools::install_github("yrvelez/claudeR")
+
+# For CLI features, also install Claude Code
+# npm install -g @anthropic-ai/claude-code
 ```
 
-## Basic Usage
-
-Load the package and set your API key:
+## Quick Start
 
 ```r
 library(claudeR)
-
-# Set your API key as an environment variable (recommended)
 Sys.setenv(ANTHROPIC_API_KEY = "your_api_key_here")
 
-# Or pass it directly in function calls
-# api_key = "your_api_key_here"
-```
-
-### Claude 2 Example
-
-```r
-response <- claudeR(
-  prompt = "What is the capital of France?",
-  model = "claude-2",
-  max_tokens = 50
+# API: Simple completion
+claudeR(
+  prompt = list(list(role = "user", content = "What is R?")),
+  max_tokens = 100
 )
 
-cat(response)
+# CLI: Agentic coding (requires Claude Code CLI)
+claude_code("List the files in the current directory")
 ```
 
-### Claude 3 Example
+## API Interface
+
+### Basic Usage
 
 ```r
+# Claude 4.5 Sonnet (default)
 response <- claudeR(
-  prompt = list(list(role = "user", content = "What is the capital of France?")),
-  model = "claude-3-opus-20240229",
-  max_tokens = 50
+  prompt = list(list(role = "user", content = "Explain tibbles in R")),
+  max_tokens = 200
 )
 
-cat(response)
-```
-
-### Claude 3.7 with Extended Thinking
-
-Claude 3.7 introduces an extended thinking capability that improves reasoning for complex problems:
-
-```r
-result <- claudeR(
-  prompt = list(list(role = "user", content = "Solve this math problem: If f(x) = 2x² + 3x - 5, find all values of x where f(x) = 20")),
-  model = "claude-3-7-sonnet-20250219",
-  thinking = list(type = "enabled", budget_tokens = 2000),
-  return_thinking = TRUE
-)
-
-# Access thinking and response separately
-cat("Thinking process:\n", result$thinking, "\n\n")
-cat("Final answer:\n", result$response)
-```
-
-### Claude 4.5
-
-Claude 4.5 represents the latest generation of models with enhanced capabilities and performance. The family includes three tiers:
-
-- **Claude Opus 4.5** (`claude-opus-4-5-20251101`): The most intelligent model with maximum capability for complex reasoning, coding, and problem-solving
-- **Claude Sonnet 4.5** (`claude-sonnet-4-5-20250929`): Balanced performance and speed (default)
-- **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`): Fastest and most efficient, matching Sonnet 4 performance at lower cost
-
-#### Claude 4.5 Sonnet (Default)
-
-```r
+# Use a different model
 response <- claudeR(
-  prompt = list(list(role = "user", content = "Explain quantum entanglement in simple terms")),
-  model = "claude-sonnet-4-5-20250929",
-  thinking = list(type = "enabled", budget_tokens = 2000),
-  return_thinking = TRUE
-)
-
-# Access thinking and response separately
-cat("Thinking process:\n", result$thinking, "\n\n")
-cat("Final answer:\n", result$response)
-```
-
-#### Claude 4.5 Opus
-
-Use Opus 4.5 for the most demanding tasks requiring maximum intelligence:
-
-```r
-response <- claudeR(
-  prompt = list(list(role = "user", content = "Analyze this complex algorithm and suggest optimizations")),
+  prompt = list(list(role = "user", content = "Explain tibbles in R")),
   model = "claude-opus-4-5-20251101",
-  thinking = list(type = "enabled", budget_tokens = 2000),
-  return_thinking = TRUE
+  max_tokens = 200
 )
 
-# Access thinking and response separately
-cat("Thinking process:\n", result$thinking, "\n\n")
-cat("Final answer:\n", result$response)
-```
-
-#### Claude 4.5 Haiku
-
-Use Haiku 4.5 for fast, cost-efficient responses:
-
-```r
+# With system prompt
 response <- claudeR(
-  prompt = list(list(role = "user", content = "Summarize the key points of this text")),
-  model = "claude-haiku-4-5-20251001",
-  thinking = list(type = "enabled", budget_tokens = 2000),
-  return_thinking = TRUE
+  prompt = list(list(role = "user", content = "Review this code: x <- c(1,2,NA); mean(x)")),
+  system_prompt = "You are an expert R programmer. Be concise.",
+  max_tokens = 300
 )
-
-# Access thinking and response separately
-cat("Thinking process:\n", result$thinking, "\n\n")
-cat("Final answer:\n", result$response)
 ```
 
-Claude 4.5 uses the same message format as Claude 3, making it easy to upgrade existing code. Simply specify the Claude 4.5 model name, or omit the `model` parameter to use the default Claude 4.5 Sonnet model.
+### Extended Thinking
 
-## Function Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `prompt` | For Claude 2: A string with the prompt text. For Claude 3/4: A list of message objects with `role` and `content` fields. |
-| `model` | The model to use. Default: `"claude-sonnet-4-5-20250929"`. |
-| `max_tokens` | Maximum number of tokens to generate. Default: `100`. |
-| `stop_sequences` | A list of strings upon which to stop generating. |
-| `temperature` | Controls randomness (0-1). Default: `0.7`. Must be exactly `1` when using extended thinking. |
-| `top_k` | Only sample from top K options for each token. Default: `-1`. Automatically disabled with extended thinking. |
-| `top_p` | Controls diversity via nucleus sampling. Default: `-1`. Automatically disabled with extended thinking. |
-| `api_key` | Your API key. If `NULL`, reads from `ANTHROPIC_API_KEY` environment variable. |
-| `system_prompt` | Optional system instructions for Claude 3 models. |
-| `thinking` | For Claude 3.7: A list with `type="enabled"` and `budget_tokens` to activate extended thinking. |
-| `stream_thinking` | Whether to stream the response in real-time. Default: `TRUE`. |
-| `return_thinking` | Whether to return thinking output. Default: `FALSE`. |
-
-## Extended Thinking Mode
-
-Claude 3.7 features an advanced extended thinking mode that helps the model solve complex reasoning problems more effectively. To use this feature:
-
-1. Set `thinking = list(type = "enabled", budget_tokens = N)` where N is the token budget for thinking
-2. Set `return_thinking = TRUE` to see the thinking process
-3. When using extended thinking, the following constraints apply:
-   - `temperature` must be set to exactly 1 (handled automatically)
-   - `top_p` and `top_k` parameters are disabled (handled automatically)
-   - `max_tokens` must be greater than `budget_tokens` (auto-adjusted if needed)
-
-Example with formatted output:
+For complex reasoning tasks, enable extended thinking:
 
 ```r
 result <- claudeR(
-  prompt = list(list(role = "user", content = "Solve this combinatorial problem: In how many ways can 8 people be seated at a round table, considering that rotations of the same arrangement are considered the same?")),
-  model = "claude-3-7-sonnet-20250219",
-  thinking = list(type = "enabled", budget_tokens = 3000),
-  max_tokens = 4000,
+  prompt = list(list(role = "user", content = "Solve: If f(x) = 2x^2 + 3x - 5, find x where f(x) = 20")),
+  thinking = list(type = "enabled", budget_tokens = 2000),
   return_thinking = TRUE
 )
+
+cat("Thinking:\n", result$thinking, "\n\n")
+cat("Answer:\n", result$response)
 ```
 
-This will display:
-- Thinking process with a clear header
-- Final response with its own header
-- Return a list with both components accessible as `result$thinking` and `result$response`
+### Model Options
+
+| Model | ID | Use Case |
+|-------|-----|----------|
+| Claude 4.5 Opus | `claude-opus-4-5-20251101` | Most capable, complex reasoning |
+| Claude 4.5 Sonnet | `claude-sonnet-4-5-20250929` | Balanced (default) |
+| Claude 4.5 Haiku | `claude-haiku-4-5-20251001` | Fast, cost-efficient |
+| Claude 3.7 Sonnet | `claude-3-7-sonnet-20250219` | Extended thinking |
+| Claude 2 | `claude-2` | Legacy support |
+
+### API Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `prompt` | String (Claude 2) or list of messages (Claude 3+) | required |
+| `model` | Model identifier | `claude-sonnet-4-5-20250929` |
+| `max_tokens` | Maximum tokens to generate | `100` |
+| `temperature` | Randomness (0-1). Must be 1 with thinking. | `0.7` |
+| `system_prompt` | System instructions (Claude 3+) | `NULL` |
+| `thinking` | Extended thinking config | `NULL` |
+| `return_thinking` | Return thinking in output | `FALSE` |
+| `stream_thinking` | Stream response in real-time | `TRUE` |
+
+## CLI Interface (Claude Code)
+
+The CLI interface provides agentic capabilities—Claude can read/write files, execute code, and perform multi-step tasks.
+
+### Setup
+
+```r
+# Check if Claude Code is installed
+claude_code_available(verbose = TRUE)
+
+# View configuration
+claude_code_config_print()
+
+# Configure settings
+claude_code_config(timeout = 600)
+```
+
+### Basic Usage
+
+```r
+# Simple prompt
+claude_code("What files are in the current directory?")
+
+# With JSON output
+result <- claude_code("List 3 R packages for visualization", output_format = "json")
+
+# Restrict available tools
+claude_code("Analyze data.csv", allowed_tools = c("Read", "Bash"))
+```
+
+### Convenience Functions
+
+```r
+# Pipe data to Claude
+mtcars |> claude_code_pipe("Describe this dataset and suggest visualizations")
+
+# Analyze a file
+claude_code_file("analysis.R", "Review this code for potential issues")
+
+# Code review with focus
+claude_code_review("script.R", focus = "performance")
+
+# Generate code
+claude_code_generate("function to calculate rolling mean", language = "R")
+
+# Analyze a data frame
+claude_code_analyze(iris, "What patterns exist in this data?")
+```
+
+### Batch Processing
+
+```r
+prompts <- c(
+  "Explain ggplot2",
+  "Explain dplyr",
+  "Explain tidyr"
+)
+
+results <- claude_code_batch(prompts, progress = TRUE)
+```
+
+### Session Management
+
+```r
+# List previous sessions
+claude_code_sessions()
+
+# Resume a session
+claude_code_session("Continue our analysis", session_id = "last")
+```
+
+### Interactive Chat
+
+```r
+# Start an interactive chat (in R console)
+claude_code_chat()
+```
+
+### Response Utilities
+
+```r
+response <- claude_code("Write an R function to parse JSON")
+
+# Extract code blocks
+code <- claude_code_extract(response, language = "r")
+
+# Parse JSON from response
+data <- claude_code_parse(response)
+
+# Pretty print
+claude_code_print(response)
+```
+
+### CLI Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `prompt` | The prompt to send | required |
+| `output_format` | "text", "json", or "stream-json" | `"text"` |
+| `model` | Model to use | config default |
+| `max_turns` | Maximum agentic turns | `NULL` |
+| `system_prompt` | Custom system prompt | `NULL` |
+| `allowed_tools` | Tools Claude can use | all |
+| `disallowed_tools` | Tools Claude cannot use | none |
+| `permission_mode` | "default", "acceptEdits", "bypassPermissions" | `"default"` |
+| `working_dir` | Working directory | `getwd()` |
+| `timeout` | Timeout in seconds | `300` |
+
+## When to Use API vs CLI
+
+| Use Case | Recommended |
+|----------|-------------|
+| Simple text completion | API (`claudeR`) |
+| Streaming responses | API (`claudeR`) |
+| Extended thinking | API (`claudeR`) |
+| File operations | CLI (`claude_code`) |
+| Code execution | CLI (`claude_code`) |
+| Multi-step tasks | CLI (`claude_code`) |
+| Interactive coding | CLI (`claude_code_chat`) |
 
 ## License
 
-This package is released under the MIT License.
+MIT License
