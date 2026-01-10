@@ -25,7 +25,35 @@
 #' @param thinking (Optional) A list with type="enabled" and budget_tokens to enable Claude's thinking mode.
 #' @param stream_thinking (Optional) Whether to stream thinking output in real-time. Default is TRUE.
 #' @param return_thinking (Optional) Whether to include thinking output in the final response. Default is FALSE.
-#' @return The resulting completion up to and excluding the stop sequences.
+#' @return A character string containing the model's response. If \code{return_thinking = TRUE},
+#'   returns a list with elements \code{thinking} and \code{response}.
+#'
+#' @examples
+#' \dontrun{
+#' # Basic usage with Claude 3/4 models (requires API key)
+#' response <- claudeR(
+#'   prompt = list(list(role = "user", content = "What is the capital of France?")),
+#'   model = "claude-sonnet-4-5-20250929",
+#'   max_tokens = 100
+#' )
+#'
+#' # Using extended thinking mode
+#' response <- claudeR(
+#'   prompt = list(list(role = "user", content = "Solve this step by step: 15 * 23")),
+#'   model = "claude-sonnet-4-5-20250929",
+#'   max_tokens = 8000,
+#'   thinking = list(type = "enabled", budget_tokens = 5000),
+#'   return_thinking = TRUE
+#' )
+#'
+#' # With a system prompt
+#' response <- claudeR(
+#'   prompt = list(list(role = "user", content = "Translate to Spanish: Hello world")),
+#'   model = "claude-sonnet-4-5-20250929",
+#'   system_prompt = "You are a helpful translator.",
+#'   max_tokens = 100
+#' )
+#' }
 #' @export
 claudeR <- function(prompt,
                     model = "claude-sonnet-4-5-20250929",
