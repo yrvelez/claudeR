@@ -290,7 +290,7 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
 
   if (verbose) {
     cat("\n")
-    .cc_ln(.cc_header("Pipe Context Objects"))
+    .cc_ln(.cc_header("Pipe Objects (available in R environment)"))
     cat("\n")
 
     # Show original data first if present
@@ -1518,10 +1518,17 @@ claude_pipe <- function(.data,
 
       # Show new objects created
       objects_after <- ls(pipe_ctx, all.names = FALSE)
-      new_objects <- setdiff(objects_after, c(objects_before, ".data"))
+      new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
       if (length(new_objects) > 0) {
-        .cc_ln(.cc_info(paste("New context objects:", paste(new_objects, collapse = ", "))))
+        .cc_ln(.cc_info(paste("Objects created in R environment:", paste(new_objects, collapse = ", "))))
       }
+    }
+
+    # Copy new objects to the global environment so they're accessible to the user
+    objects_after <- ls(pipe_ctx, all.names = FALSE)
+    new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
+    for (obj_name in new_objects) {
+      assign(obj_name, get(obj_name, envir = pipe_ctx), envir = .GlobalEnv)
     }
 
     eval_result
