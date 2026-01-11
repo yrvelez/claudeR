@@ -1092,6 +1092,290 @@ for (i in seq_along(code_blocks)) {
   cat("\n")
 }
 
+# ============================================================================
+# Pipe Operator with Code Execution
+# ============================================================================
+
+#' Pipe data to Claude and execute generated code
+#'
+#' A pipe-friendly function that sends data to Claude with a natural language
+#' prompt, receives generated R code, executes it, and returns the result.
+#' This enables workflows like \code{mtcars |> claude_pipe("create a scatterplot")}.
+#'
+#' @param .data Data to pipe to Claude (data.frame, vector, list, or other R object).
+#' @param prompt Natural language description of what to do with the data.
+#' @param execute Logical; if TRUE (default), execute the generated code.
+#'   If FALSE, return the code as a string without executing.
+#' @param envir Environment in which to execute the code. Defaults to the
+#'   calling environment, which allows the result to access piped data.
+#' @param model Model to use (overrides default from config).
+#' @param verbose Logical; if TRUE, print status messages and show generated code.
+#' @param ... Additional arguments passed to \code{claude_code}.
+#'
+#' @return If \code{execute = TRUE}, returns the result of executing the
+#'   generated code. If \code{execute = FALSE}, returns the generated code
+#'   as a character string. Returns NULL if code generation or execution fails.
+#'
+#' @details
+#' The function works by:
+#' \enumerate{
+#'   \item Serializing the input data (showing structure and head for data frames)
+#'   \item Sending the data representation and prompt to Claude
+#'   \item Extracting R code from Claude's response
+#'   \item Executing the code in the specified environment
+#'   \item Returning the result
+#' }
+#'
+#' The input data is available in the generated code as \code{.data}, allowing
+#' Claude to reference it directly. For data frames, Claude also receives
+#' column names, types, and a preview of the data.
+#'
+#' @examples
+#' \dontrun{
+#' # Create a visualization
+#' mtcars |> claude_pipe("Create a pretty scatter plot of mpg vs cyl")
+#'
+#' # Data transformation
+#' iris |> claude_pipe("Calculate mean petal length by species")
+#'
+#' # Get code without executing
+#' code <- mtcars |> claude_pipe("Create a summary table", execute = FALSE)
+#' cat(code)
+#'
+#' # Verbose mode to see what's happening
+#' mtcars |> claude_pipe("Fit a linear model of mpg ~ wt", verbose = TRUE)
+#' }
+#'
+#' @family claude_code
+#' @export
+claude_pipe <- function(.data,
+                        prompt,
+                        execute = TRUE,
+                        envir = parent.frame(),
+                        model = NULL,
+                        verbose = FALSE,
+                        ...) {
+
+  if (!claude_code_available()) {
+    .cc_ln(.cc_error("Claude Code CLI not found"))
+    .cc_ln(.cc_info("Install with: npm install -g @anthropic-ai/claude-code"))
+    stop("Claude Code CLI not available", call. = FALSE)
+  }
+
+  # Prepare data representation for Claude
+  data_info <- .cc_prepare_data_for_pipe(.data, verbose)
+
+  # Build the prompt with data context and instructions
+  system_prompt <- .cc_pipe_system_prompt()
+
+  full_prompt <- paste0(
+    "The user has piped the following R data to you:\n\n",
+    "<data_info>\n",
+    data_info,
+    "\n</data_info>\n\n",
+    "The data is available in the variable `.data` in the R environment.\n\n",
+    "User request: ", prompt, "\n\n",
+    "Generate R code to accomplish this task. The code should use `.data` to reference the input data."
+  )
+
+  if (verbose) {
+    cat("\n")
+    .cc_ln(.cc_header("Claude Pipe"))
+    cat("\n")
+    .cc_ln(.cc_kv("Data type", class(.data)[1]))
+    if (is.data.frame(.data)) {
+      .cc_ln(.cc_kv("Dimensions", sprintf("%d x %d", nrow(.data), ncol(.data))))
+    }
+    .cc_ln(.cc_kv("Prompt", if (nchar(prompt) > 50) paste0(substr(prompt, 1, 50), "...") else prompt))
+    .cc_ln(.cc_kv("Execute", execute))
+    cat("\n")
+    .cc_ln(.cc_info("Sending to Claude..."))
+  }
+
+  # Call Claude
+  response <- tryCatch(
+    claude_code(full_prompt, system_prompt = system_prompt, model = model, ...),
+    error = function(e) {
+      .cc_ln(.cc_error(paste("Claude API error:", e$message)))
+      return(NULL)
+    }
+  )
+
+  if (is.null(response)) return(invisible(NULL))
+
+  # Extract R code from response
+  code_blocks <- .cc_extract_r_code(response)
+
+  if (length(code_blocks) == 0) {
+    if (verbose) .cc_ln(.cc_warn("No R code blocks found in response"))
+    # Try to find any code-like content
+    warning("Claude did not return R code in expected format", call. = FALSE)
+    if (verbose) {
+      cat("\nClaude's response:\n")
+      cat(response)
+      cat("\n")
+    }
+    return(invisible(NULL))
+  }
+
+  # Combine all code blocks
+  code <- paste(code_blocks, collapse = "\n\n")
+
+  if (verbose) {
+    cat("\n")
+    .cc_ln(.cc_header("Generated Code"))
+    cat("\n")
+    cat(code)
+    cat("\n\n")
+  }
+
+  # Return code if not executing
+
+  if (!execute) {
+    return(code)
+  }
+
+  # Execute the code
+  if (verbose) .cc_ln(.cc_info("Executing code..."))
+
+  result <- tryCatch({
+    # Make .data available in the execution environment
+    exec_env <- new.env(parent = envir)
+    exec_env$.data <- .data
+
+    # Parse and evaluate
+    parsed <- parse(text = code)
+    eval_result <- NULL
+    for (expr in parsed) {
+      eval_result <- eval(expr, envir = exec_env)
+    }
+
+    if (verbose) .cc_ln(.cc_success("Execution complete"))
+    eval_result
+  }, error = function(e) {
+    .cc_ln(.cc_error(paste("Execution failed:", e$message)))
+    if (verbose) {
+      cat("\nFailed code:\n")
+      cat(code)
+      cat("\n")
+    }
+    warning("Code execution failed: ", e$message, call. = FALSE)
+    invisible(NULL)
+  })
+
+  result
+}
+
+#' @rdname claude_pipe
+#' @export
+`%|c>%` <- function(.data, prompt) {
+
+  claude_pipe(.data, prompt)
+}
+
+# Helper: Prepare data representation for Claude
+.cc_prepare_data_for_pipe <- function(.data, verbose = FALSE) {
+  if (is.data.frame(.data)) {
+    # For data frames, provide comprehensive info
+    parts <- c(
+      sprintf("Type: data.frame (%d rows x %d columns)", nrow(.data), ncol(.data)),
+      "",
+      "Column information:"
+    )
+
+    col_info <- sapply(names(.data), function(nm) {
+      col <- .data[[nm]]
+      cls <- class(col)[1]
+      if (is.numeric(col)) {
+        rng <- range(col, na.rm = TRUE)
+        sprintf("  - %s: %s [range: %.3g to %.3g]", nm, cls, rng[1], rng[2])
+      } else if (is.factor(col)) {
+        lvls <- levels(col)
+        lvl_str <- if (length(lvls) > 5) {
+          paste0(paste(head(lvls, 5), collapse = ", "), ", ... (", length(lvls), " levels)")
+        } else {
+          paste(lvls, collapse = ", ")
+        }
+        sprintf("  - %s: factor [%s]", nm, lvl_str)
+      } else if (is.character(col)) {
+        sprintf("  - %s: character", nm)
+      } else {
+        sprintf("  - %s: %s", nm, cls)
+      }
+    })
+
+    parts <- c(parts, col_info, "")
+
+    # Show first few rows
+    n_preview <- min(10, nrow(.data))
+    preview <- paste(capture.output(print(head(.data, n_preview))), collapse = "\n")
+    parts <- c(parts, sprintf("First %d rows:", n_preview), preview)
+
+    if (nrow(.data) > n_preview) {
+      parts <- c(parts, sprintf("... (%d more rows)", nrow(.data) - n_preview))
+    }
+
+    paste(parts, collapse = "\n")
+
+  } else if (is.list(.data)) {
+    # For lists, show structure
+    struct <- paste(capture.output(str(.data, max.level = 2)), collapse = "\n")
+    paste0("Type: list\n\nStructure:\n", struct)
+
+  } else if (is.vector(.data)) {
+    # For vectors
+    len <- length(.data)
+    cls <- class(.data)[1]
+    preview <- if (len > 20) {
+      paste0(paste(head(.data, 20), collapse = ", "), ", ... (", len, " elements)")
+    } else {
+      paste(.data, collapse = ", ")
+    }
+    sprintf("Type: %s vector (length %d)\n\nValues: %s", cls, len, preview)
+
+  } else if (is.matrix(.data)) {
+    # For matrices
+    dims <- dim(.data)
+    preview <- paste(capture.output(print(head(.data, 10))), collapse = "\n")
+    sprintf("Type: matrix (%d x %d)\n\nPreview:\n%s", dims[1], dims[2], preview)
+
+  } else {
+    # For other objects
+    struct <- paste(capture.output(str(.data)), collapse = "\n")
+    sprintf("Type: %s\n\nStructure:\n%s", class(.data)[1], struct)
+  }
+}
+
+# System prompt for pipe operations
+.cc_pipe_system_prompt <- function() {
+  paste0(
+    "You are an R coding assistant helping with piped data operations. ",
+    "The user has piped R data to you and wants you to perform an operation on it.\n\n",
+    "CRITICAL RULES:\n",
+    "1. ALWAYS output R code in a fenced code block with ```r marker\n",
+    "2. The input data is available as `.data` - always use this variable\n",
+    "3. Generate complete, runnable R code\n",
+    "4. For visualizations, use base R or ggplot2 (assume ggplot2 is available)\n",
+    "5. Keep code concise and focused on the task\n",
+    "6. Do NOT include library() calls for base packages\n",
+    "7. If using ggplot2, include library(ggplot2) at the start\n",
+    "8. The last expression should be the result to return (e.g., the plot or computed value)\n\n",
+    "Example - if user says 'Create a scatter plot of mpg vs cyl':\n",
+    "```r\n",
+    "library(ggplot2)\n",
+    "ggplot(.data, aes(x = cyl, y = mpg)) +\n",
+    "  geom_point() +\n",
+    "  labs(title = \"MPG vs Cylinders\", x = \"Cylinders\", y = \"MPG\") +\n",
+    "  theme_minimal()\n",
+    "```\n\n",
+    "Example - if user says 'Calculate mean by group':\n",
+    "```r\n",
+    "aggregate(. ~ group_column, data = .data, FUN = mean)\n",
+    "```\n\n",
+    "Always reference the data as `.data` and provide clean, working code."
+  )
+}
+
 # Helper: Execute a single code block with error handling
 .cc_execute_code_block <- function(code, block_num) {
   cat("\n")
