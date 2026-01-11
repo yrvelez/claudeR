@@ -171,6 +171,175 @@ claude_code_version <- function(verbose = TRUE) {
 }
 
 # ============================================================================
+# Pipe Context Management
+# ============================================================================
+
+#' Get or initialize the pipe context environment
+#'
+#' The pipe context is a persistent environment that accumulates objects
+#' across chained \code{claude_pipe()} calls. This allows you to reference
+#' objects created in previous pipes in subsequent operations.
+#'
+#' @return The pipe context environment (invisibly when setting).
+#'
+#' @examples
+#' \dontrun{
+#' # Objects created in pipes are available in subsequent pipes
+#' mtcars |>
+#'   claude_pipe("Create a linear model called 'fit' for mpg ~ wt + hp") |>
+#'   claude_pipe("Create a summary of the 'fit' model from the previous step")
+#'
+#' # Check what objects are available in the context
+#' claude_pipe_context_objects()
+#'
+#' # Clear the context to start fresh
+#' claude_pipe_context_clear()
+#' }
+#'
+#' @family claude_code
+#' @export
+claude_pipe_context <- function() {
+  if (!exists(".claude_code_config", envir = .GlobalEnv)) {
+    claude_code_config(quiet = TRUE)
+  }
+
+  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+
+  if (is.null(cfg$pipe_context) || !is.environment(cfg$pipe_context)) {
+    cfg$pipe_context <- new.env(parent = .GlobalEnv)
+  }
+
+  cfg$pipe_context
+}
+
+#' Clear the pipe context
+#'
+#' Removes all objects from the pipe context environment, allowing you to
+#' start fresh with a new chain of pipe operations.
+#'
+#' @param verbose Logical; if TRUE, print confirmation message.
+#' @return Invisibly returns TRUE.
+#'
+#' @examples
+#' \dontrun{
+#' # Clear context before starting a new analysis
+#' claude_pipe_context_clear()
+#'
+#' mtcars |> claude_pipe("Create a summary")
+#' }
+#'
+#' @family claude_code
+#' @export
+claude_pipe_context_clear <- function(verbose = TRUE) {
+  ctx <- claude_pipe_context()
+  rm(list = ls(ctx, all.names = TRUE), envir = ctx)
+  if (verbose) .cc_ln(.cc_success("Pipe context cleared"))
+  invisible(TRUE)
+}
+
+#' List objects in the pipe context
+#'
+#' Shows all objects currently available in the pipe context from previous
+#' pipe operations.
+#'
+#' @param verbose Logical; if TRUE, print formatted object info.
+#' @return A named list with object names, classes, and brief descriptions.
+#'
+#' @examples
+#' \dontrun{
+#' # See what objects are available from previous pipes
+#' claude_pipe_context_objects()
+#' }
+#'
+#' @family claude_code
+#' @export
+claude_pipe_context_objects <- function(verbose = TRUE) {
+  ctx <- claude_pipe_context()
+  obj_names <- ls(ctx, all.names = FALSE)
+
+  if (length(obj_names) == 0) {
+    if (verbose) .cc_ln(.cc_info("Pipe context is empty"))
+    return(invisible(list()))
+  }
+
+  obj_info <- lapply(obj_names, function(nm) {
+    obj <- get(nm, envir = ctx)
+    cls <- class(obj)[1]
+    desc <- if (is.data.frame(obj)) {
+      sprintf("data.frame [%d x %d]", nrow(obj), ncol(obj))
+    } else if (inherits(obj, "lm")) {
+      sprintf("lm (%s)", deparse(obj$call)[1])
+    } else if (inherits(obj, "glm")) {
+      sprintf("glm (%s)", deparse(obj$call)[1])
+    } else if (is.function(obj)) {
+      "function"
+    } else if (is.list(obj)) {
+      sprintf("list [%d elements]", length(obj))
+    } else if (is.vector(obj)) {
+      sprintf("%s [length %d]", cls, length(obj))
+    } else {
+      cls
+    }
+    list(name = nm, class = cls, description = desc)
+  })
+
+  names(obj_info) <- obj_names
+
+  if (verbose) {
+    cat("\n")
+    .cc_ln(.cc_header("Pipe Context Objects"))
+    cat("\n")
+    for (info in obj_info) {
+      .cc_ln(.cc_kv(info$name, info$description))
+    }
+    cat("\n")
+  }
+
+  invisible(obj_info)
+}
+
+# Internal: Format pipe context info for Claude
+.cc_format_context_info <- function(ctx) {
+  obj_names <- ls(ctx, all.names = FALSE)
+
+  if (length(obj_names) == 0) {
+    return(NULL)
+  }
+
+  obj_descriptions <- sapply(obj_names, function(nm) {
+    obj <- get(nm, envir = ctx)
+    cls <- class(obj)[1]
+    if (is.data.frame(obj)) {
+      cols <- paste(names(obj), collapse = ", ")
+      sprintf("  - %s: data.frame [%d rows x %d cols] with columns: %s",
+              nm, nrow(obj), ncol(obj), cols)
+    } else if (inherits(obj, "lm")) {
+      sprintf("  - %s: linear model (%s)", nm, deparse(obj$call)[1])
+    } else if (inherits(obj, "glm")) {
+      sprintf("  - %s: generalized linear model (%s)", nm, deparse(obj$call)[1])
+    } else if (inherits(obj, "ggplot")) {
+      sprintf("  - %s: ggplot object", nm)
+    } else if (is.function(obj)) {
+      sprintf("  - %s: function", nm)
+    } else if (is.list(obj)) {
+      sprintf("  - %s: list with %d elements", nm, length(obj))
+    } else if (is.vector(obj)) {
+      sprintf("  - %s: %s vector [length %d]", nm, cls, length(obj))
+    } else if (is.matrix(obj)) {
+      sprintf("  - %s: matrix [%d x %d]", nm, nrow(obj), ncol(obj))
+    } else {
+      sprintf("  - %s: %s", nm, cls)
+    }
+  })
+
+  paste0(
+    "Objects available from previous pipe operations:\n",
+    paste(obj_descriptions, collapse = "\n"),
+    "\n\nYou can reference these objects directly by name in your code."
+  )
+}
+
+# ============================================================================
 # Core Execution
 # ============================================================================
 
@@ -1102,6 +1271,10 @@ for (i in seq_along(code_blocks)) {
 #' prompt, receives generated R code, executes it, and returns the result.
 #' This enables workflows like \code{mtcars |> claude_pipe("create a scatterplot")}.
 #'
+#' Objects created during code execution are stored in a persistent pipe context,
+#' allowing subsequent pipe operations to reference them. For example, you can
+#' create a model in one pipe and summarize it in the next.
+#'
 #' @param .data Data to pipe to Claude (data.frame, vector, list, or other R object).
 #' @param prompt Natural language description of what to do with the data.
 #' @param execute Logical; if TRUE (default), execute the generated code.
@@ -1122,13 +1295,19 @@ for (i in seq_along(code_blocks)) {
 #'   \item Serializing the input data (showing structure and head for data frames)
 #'   \item Sending the data representation and prompt to Claude
 #'   \item Extracting R code from Claude's response
-#'   \item Executing the code in the specified environment
+#'   \item Executing the code in a persistent pipe context environment
+#'   \item Storing any created objects in the context for future pipes
 #'   \item Returning the result
 #' }
 #'
 #' The input data is available in the generated code as \code{.data}, allowing
 #' Claude to reference it directly. For data frames, Claude also receives
 #' column names, types, and a preview of the data.
+#'
+#' Objects created in previous pipe operations are also available and can be
+#' referenced by name. Use \code{claude_pipe_context_objects()} to see what
+#' objects are available, and \code{claude_pipe_context_clear()} to reset
+#' the context.
 #'
 #' @examples
 #' \dontrun{
@@ -1137,6 +1316,17 @@ for (i in seq_along(code_blocks)) {
 #'
 #' # Data transformation
 #' iris |> claude_pipe("Calculate mean petal length by species")
+#'
+#' # Chain operations with object references
+#' mtcars |>
+#'   claude_pipe("Create a linear model called 'fit' for mpg ~ wt + hp") |>
+#'   claude_pipe("Show the summary of the 'fit' model")
+#'
+#' # Check available context objects
+#' claude_pipe_context_objects()
+#'
+#' # Clear context to start fresh
+#' claude_pipe_context_clear()
 #'
 #' # Get code without executing
 #' code <- mtcars |> claude_pipe("Create a summary table", execute = FALSE)
@@ -1162,11 +1352,18 @@ claude_pipe <- function(.data,
     stop("Claude Code CLI not available", call. = FALSE)
   }
 
+  # Get the persistent pipe context
+
+  pipe_ctx <- claude_pipe_context()
+
   # Prepare data representation for Claude
   data_info <- .cc_prepare_data_for_pipe(.data, verbose)
 
+  # Get context info for objects from previous pipes
+  context_info <- .cc_format_context_info(pipe_ctx)
+
   # Build the prompt with data context and instructions
-  system_prompt <- .cc_pipe_system_prompt()
+  system_prompt <- .cc_pipe_system_prompt(has_context = !is.null(context_info))
 
   full_prompt <- paste0(
     "The user has piped the following R data to you:\n\n",
@@ -1174,8 +1371,10 @@ claude_pipe <- function(.data,
     data_info,
     "\n</data_info>\n\n",
     "The data is available in the variable `.data` in the R environment.\n\n",
+    if (!is.null(context_info)) paste0("<context>\n", context_info, "\n</context>\n\n") else "",
     "User request: ", prompt, "\n\n",
-    "Generate R code to accomplish this task. The code should use `.data` to reference the input data."
+    "Generate R code to accomplish this task. The code should use `.data` to reference the input data.",
+    if (!is.null(context_info)) " You may also reference any objects from previous pipe operations." else ""
   )
 
   if (verbose) {
@@ -1188,6 +1387,10 @@ claude_pipe <- function(.data,
     }
     .cc_ln(.cc_kv("Prompt", if (nchar(prompt) > 50) paste0(substr(prompt, 1, 50), "...") else prompt))
     .cc_ln(.cc_kv("Execute", execute))
+    ctx_objs <- ls(pipe_ctx, all.names = FALSE)
+    if (length(ctx_objs) > 0) {
+      .cc_ln(.cc_kv("Context objects", paste(ctx_objs, collapse = ", ")))
+    }
     cat("\n")
     .cc_ln(.cc_info("Sending to Claude..."))
   }
@@ -1238,19 +1441,32 @@ claude_pipe <- function(.data,
   # Execute the code
   if (verbose) .cc_ln(.cc_info("Executing code..."))
 
-  result <- tryCatch({
-    # Make .data available in the execution environment
-    exec_env <- new.env(parent = envir)
-    exec_env$.data <- .data
+  # Track objects before execution to identify new ones
+  objects_before <- ls(pipe_ctx, all.names = FALSE)
 
-    # Parse and evaluate
+  result <- tryCatch({
+    # Use the persistent pipe context as execution environment
+    # Set .data in the context for this execution
+    pipe_ctx$.data <- .data
+
+    # Parse and evaluate in the pipe context
     parsed <- parse(text = code)
     eval_result <- NULL
     for (expr in parsed) {
-      eval_result <- eval(expr, envir = exec_env)
+      eval_result <- eval(expr, envir = pipe_ctx)
     }
 
-    if (verbose) .cc_ln(.cc_success("Execution complete"))
+    if (verbose) {
+      .cc_ln(.cc_success("Execution complete"))
+
+      # Show new objects created
+      objects_after <- ls(pipe_ctx, all.names = FALSE)
+      new_objects <- setdiff(objects_after, c(objects_before, ".data"))
+      if (length(new_objects) > 0) {
+        .cc_ln(.cc_info(paste("New context objects:", paste(new_objects, collapse = ", "))))
+      }
+    }
+
     eval_result
   }, error = function(e) {
     .cc_ln(.cc_error(paste("Execution failed:", e$message)))
@@ -1347,19 +1563,34 @@ claude_pipe <- function(.data,
 }
 
 # System prompt for pipe operations
-.cc_pipe_system_prompt <- function() {
-  paste0(
+.cc_pipe_system_prompt <- function(has_context = FALSE) {
+  base_prompt <- paste0(
     "You are an R coding assistant helping with piped data operations. ",
     "The user has piped R data to you and wants you to perform an operation on it.\n\n",
     "CRITICAL RULES:\n",
     "1. ALWAYS output R code in a fenced code block with ```r marker\n",
-    "2. The input data is available as `.data` - always use this variable\n",
+    "2. The input data is available as `.data` - always use this variable for the piped data\n",
     "3. Generate complete, runnable R code\n",
     "4. For visualizations, use base R or ggplot2 (assume ggplot2 is available)\n",
     "5. Keep code concise and focused on the task\n",
     "6. Do NOT include library() calls for base packages\n",
     "7. If using ggplot2, include library(ggplot2) at the start\n",
-    "8. The last expression should be the result to return (e.g., the plot or computed value)\n\n",
+    "8. The last expression should be the result to return (e.g., the plot or computed value)\n"
+  )
+
+  context_rules <- if (has_context) {
+    paste0(
+      "9. Objects from previous pipe operations are available in the environment - ",
+      "you can reference them directly by name\n",
+      "10. When the user mentions an object from a previous step, use it directly\n",
+      "11. If creating new named objects (models, data frames, etc.), use descriptive names ",
+      "so they can be referenced in subsequent pipes\n\n"
+    )
+  } else {
+    "\n"
+  }
+
+  examples <- paste0(
     "Example - if user says 'Create a scatter plot of mpg vs cyl':\n",
     "```r\n",
     "library(ggplot2)\n",
@@ -1371,8 +1602,31 @@ claude_pipe <- function(.data,
     "Example - if user says 'Calculate mean by group':\n",
     "```r\n",
     "aggregate(. ~ group_column, data = .data, FUN = mean)\n",
-    "```\n\n",
-    "Always reference the data as `.data` and provide clean, working code."
+    "```\n"
+  )
+
+  context_examples <- if (has_context) {
+    paste0(
+      "\nExample - if user previously created 'fit' model and now says 'Show summary of fit':\n",
+      "```r\n",
+      "summary(fit)\n",
+      "```\n\n",
+      "Example - if user says 'Create a linear model called model1 for mpg ~ wt':\n",
+      "```r\n",
+      "model1 <- lm(mpg ~ wt, data = .data)\n",
+      "model1\n",
+      "```\n"
+    )
+  } else {
+    ""
+  }
+
+  paste0(
+    base_prompt,
+    context_rules,
+    examples,
+    context_examples,
+    "\nAlways reference the piped data as `.data` and provide clean, working code."
   )
 }
 
