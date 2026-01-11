@@ -959,7 +959,9 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL, allow_cod
     "You are an R coding assistant. When the user asks you to execute or run code, ",
     "perform analysis, or complete tasks that require R code execution:\n\n",
     "1. Output the R code in fenced code blocks with ```r marker\n",
-    "2. The user's R session can execute these code blocks with their approval\n",
+    "2. IMPORTANT: Do NOT ask for approval or confirmation before showing code. ",
+    "The R session will automatically prompt the user to approve code execution. ",
+    "Just output the code directly.\n",
     "3. Be explicit about what each code block does\n",
     "4. For multi-step operations, output separate code blocks for each step\n\n",
     "Examples of properly formatted executable code:\n",
@@ -972,7 +974,8 @@ claude_code_chat <- function(system_prompt = NULL, working_dir = NULL, allow_cod
     "# Render R Markdown\n",
     "rmarkdown::render('analysis.Rmd')\n",
     "```\n\n",
-    "Always provide complete, runnable R code that the user can execute directly."
+    "Always provide complete, runnable R code that the user can execute directly. ",
+    "Never ask 'Would you like me to proceed?' or similar - just provide the code."
   )
 }
 
@@ -1060,8 +1063,7 @@ for (i in seq_along(code_blocks)) {
     cat(sprintf("      %s\n\n", indented))
   }
 
-  .cc_ln(sprintf("Execute code? [y/n/1-%d]: ", n))
-  choice <- tolower(trimws(readline("  \u203A ")))
+  choice <- tolower(trimws(readline(sprintf("Execute code? [y/n/1-%d] \u203A ", n))))
 
   if (choice %in% c("y", "yes", "all")) {
     # Execute all code blocks
