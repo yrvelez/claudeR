@@ -1406,6 +1406,14 @@ claude_pipe <- function(.data,
   # Get the persistent pipe context
   pipe_ctx <- claude_pipe_context()
 
+  # Check for stacked pipes (chained pipe operations)
+  # If .original_data already exists, this means we're in a stacked pipe scenario
+  if (exists(".original_data", envir = pipe_ctx)) {
+    stop("Stacked pipes are not yet supported. This functionality is still being worked on. ",
+         "Please use separate pipe calls instead of chaining them together.",
+         call. = FALSE)
+  }
+
   # Store original data in context if this is a data frame and we don't already have original data
   # This preserves the initial piped data for subsequent operations in a chain
   if (is.data.frame(.data) && !exists(".original_data", envir = pipe_ctx)) {
