@@ -257,7 +257,10 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
   ctx <- claude_pipe_context()
   obj_names <- ls(ctx, all.names = FALSE)
 
-  if (length(obj_names) == 0) {
+  # Check for original data
+  has_original_data <- exists(".original_data", envir = ctx)
+
+  if (length(obj_names) == 0 && !has_original_data) {
     if (verbose) .cc_ln(.cc_info("Pipe context is empty"))
     return(invisible(list()))
   }
@@ -289,6 +292,20 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
     cat("\n")
     .cc_ln(.cc_header("Pipe Context Objects"))
     cat("\n")
+
+    # Show original data first if present
+    if (has_original_data) {
+      orig <- get(".original_data", envir = ctx)
+      orig_name <- if (exists(".original_data_name", envir = ctx)) {
+        get(".original_data_name", envir = ctx)
+      } else {
+        "data"
+      }
+      if (is.data.frame(orig)) {
+        .cc_ln(.cc_kv(".original_data", sprintf("data.frame [%d x %d] (from %s)", nrow(orig), ncol(orig), orig_name)))
+      }
+    }
+
     for (info in obj_info) {
       .cc_ln(.cc_kv(info$name, info$description))
     }
@@ -302,39 +319,73 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
 .cc_format_context_info <- function(ctx) {
   obj_names <- ls(ctx, all.names = FALSE)
 
-  if (length(obj_names) == 0) {
+  # Check for original data (stored with leading dot)
+  has_original_data <- exists(".original_data", envir = ctx)
+  original_data_info <- NULL
+
+  if (has_original_data) {
+    orig <- get(".original_data", envir = ctx)
+    orig_name <- if (exists(".original_data_name", envir = ctx)) {
+      get(".original_data_name", envir = ctx)
+    } else {
+      "original_data"
+    }
+    if (is.data.frame(orig)) {
+      cols <- paste(names(orig), collapse = ", ")
+      original_data_info <- sprintf(
+        "ORIGINAL PIPED DATA (available as `.original_data`):\n  - %s: data.frame [%d rows x %d cols] with columns: %s\n  - Use `.original_data` when you need to access the original data frame columns (e.g., mpg, cyl)",
+        orig_name, nrow(orig), ncol(orig), cols
+      )
+    }
+  }
+
+  if (length(obj_names) == 0 && is.null(original_data_info)) {
     return(NULL)
   }
 
-  obj_descriptions <- sapply(obj_names, function(nm) {
-    obj <- get(nm, envir = ctx)
-    cls <- class(obj)[1]
-    if (is.data.frame(obj)) {
-      cols <- paste(names(obj), collapse = ", ")
-      sprintf("  - %s: data.frame [%d rows x %d cols] with columns: %s",
-              nm, nrow(obj), ncol(obj), cols)
-    } else if (inherits(obj, "lm")) {
-      sprintf("  - %s: linear model (%s)", nm, deparse(obj$call)[1])
-    } else if (inherits(obj, "glm")) {
-      sprintf("  - %s: generalized linear model (%s)", nm, deparse(obj$call)[1])
-    } else if (inherits(obj, "ggplot")) {
-      sprintf("  - %s: ggplot object", nm)
-    } else if (is.function(obj)) {
-      sprintf("  - %s: function", nm)
-    } else if (is.list(obj)) {
-      sprintf("  - %s: list with %d elements", nm, length(obj))
-    } else if (is.vector(obj)) {
-      sprintf("  - %s: %s vector [length %d]", nm, cls, length(obj))
-    } else if (is.matrix(obj)) {
-      sprintf("  - %s: matrix [%d x %d]", nm, nrow(obj), ncol(obj))
-    } else {
-      sprintf("  - %s: %s", nm, cls)
-    }
-  })
+  obj_descriptions <- if (length(obj_names) > 0) {
+    sapply(obj_names, function(nm) {
+      obj <- get(nm, envir = ctx)
+      cls <- class(obj)[1]
+      if (is.data.frame(obj)) {
+        cols <- paste(names(obj), collapse = ", ")
+        sprintf("  - %s: data.frame [%d rows x %d cols] with columns: %s",
+                nm, nrow(obj), ncol(obj), cols)
+      } else if (inherits(obj, "lm")) {
+        sprintf("  - %s: linear model (%s)", nm, deparse(obj$call)[1])
+      } else if (inherits(obj, "glm")) {
+        sprintf("  - %s: generalized linear model (%s)", nm, deparse(obj$call)[1])
+      } else if (inherits(obj, "ggplot")) {
+        sprintf("  - %s: ggplot object", nm)
+      } else if (is.function(obj)) {
+        sprintf("  - %s: function", nm)
+      } else if (is.list(obj)) {
+        sprintf("  - %s: list with %d elements", nm, length(obj))
+      } else if (is.vector(obj)) {
+        sprintf("  - %s: %s vector [length %d]", nm, cls, length(obj))
+      } else if (is.matrix(obj)) {
+        sprintf("  - %s: matrix [%d x %d]", nm, nrow(obj), ncol(obj))
+      } else {
+        sprintf("  - %s: %s", nm, cls)
+      }
+    })
+  } else {
+    character(0)
+  }
+
+  parts <- c()
+  if (!is.null(original_data_info)) {
+    parts <- c(parts, original_data_info)
+  }
+  if (length(obj_descriptions) > 0) {
+    parts <- c(parts, paste0(
+      "Objects created in previous pipe operations:\n",
+      paste(obj_descriptions, collapse = "\n")
+    ))
+  }
 
   paste0(
-    "Objects available from previous pipe operations:\n",
-    paste(obj_descriptions, collapse = "\n"),
+    paste(parts, collapse = "\n\n"),
     "\n\nYou can reference these objects directly by name in your code."
   )
 }
@@ -1353,8 +1404,14 @@ claude_pipe <- function(.data,
   }
 
   # Get the persistent pipe context
-
   pipe_ctx <- claude_pipe_context()
+
+  # Store original data in context if this is a data frame and we don't already have original data
+  # This preserves the initial piped data for subsequent operations in a chain
+  if (is.data.frame(.data) && !exists(".original_data", envir = pipe_ctx)) {
+    pipe_ctx$.original_data <- .data
+    pipe_ctx$.original_data_name <- deparse(substitute(.data))
+  }
 
   # Prepare data representation for Claude
   data_info <- .cc_prepare_data_for_pipe(.data, verbose)
@@ -1584,7 +1641,10 @@ claude_pipe <- function(.data,
       "you can reference them directly by name\n",
       "10. When the user mentions an object from a previous step, use it directly\n",
       "11. If creating new named objects (models, data frames, etc.), use descriptive names ",
-      "so they can be referenced in subsequent pipes\n\n"
+      "so they can be referenced in subsequent pipes\n",
+      "12. IMPORTANT: The original data frame that started the pipe chain is preserved as `.original_data`. ",
+      "When the user asks about columns from the original data (like mpg, cyl, etc.) but `.data` is ",
+      "not a data frame (e.g., it's a plot or model), use `.original_data` instead\n\n"
     )
   } else {
     "\n"
@@ -1613,8 +1673,13 @@ claude_pipe <- function(.data,
       "```\n\n",
       "Example - if user says 'Create a linear model called model1 for mpg ~ wt':\n",
       "```r\n",
-      "model1 <- lm(mpg ~ wt, data = .data)\n",
+      "model1 <- lm(mpg ~ wt, data = .original_data)\n",
       "model1\n",
+      "```\n\n",
+      "Example - if the previous pipe created a plot and now user says 'Create a crosstab of mpg and cyl':\n",
+      "```r\n",
+      "# Use .original_data since .data is a plot, not the data frame\n",
+      "table(.original_data$mpg, .original_data$cyl)\n",
       "```\n"
     )
   } else {
