@@ -1334,14 +1334,6 @@ for (i in seq_along(code_blocks)) {
 #'   calling environment, which allows the result to access piped data.
 #' @param model Model to use (overrides default from config).
 #' @param verbose Logical; if TRUE, print status messages and show generated code.
-#' @param stream_thinking Logical; if TRUE, use the direct Anthropic API with
-#'   extended thinking enabled. Claude's thinking process will be streamed to the
-#'   console in real-time with gray text headers, providing visibility into how
-#'   Claude reasons about your data and request. Requires ANTHROPIC_API_KEY
-#'   environment variable to be set. Defaults to FALSE.
-#' @param thinking_budget Token budget for extended thinking when stream_thinking
-#'   is TRUE. Defaults to 10000 tokens. Higher values allow more thorough reasoning
-#'   but increase API costs and response time.
 #' @param max_retries Maximum number of retry attempts for Claude API calls and
 #'   code execution failures. Defaults to 3. When code execution fails, Claude
 #'   is re-prompted with the error message to fix the code.
@@ -1401,13 +1393,6 @@ for (i in seq_along(code_blocks)) {
 #'
 #' # Verbose mode to see what's happening
 #' mtcars |> claude_pipe("Fit a linear model of mpg ~ wt", verbose = TRUE)
-#'
-#' # Stream Claude's thinking process (requires ANTHROPIC_API_KEY)
-#' mtcars |> claude_pipe("Create an optimal visualization", stream_thinking = TRUE)
-#'
-#' # Increase thinking budget for complex tasks
-#' iris |> claude_pipe("Build a classification model with cross-validation",
-#'                     stream_thinking = TRUE, thinking_budget = 20000)
 #' }
 #'
 #' @family claude_code
@@ -1418,23 +1403,13 @@ claude_pipe <- function(.data,
                         envir = parent.frame(),
                         model = NULL,
                         verbose = FALSE,
-                        stream_thinking = FALSE,
-                        thinking_budget = 10000,
                         max_retries = 3,
                         ...) {
 
-  # Only check CLI availability if not using streaming (streaming uses direct API)
-  if (!stream_thinking && !claude_code_available()) {
+  if (!claude_code_available()) {
     .cc_ln(.cc_error("Claude Code CLI not found"))
     .cc_ln(.cc_info("Install with: npm install -g @anthropic-ai/claude-code"))
     stop("Claude Code CLI not available", call. = FALSE)
-  }
-
-  # Check API key if using streaming
-  if (stream_thinking && Sys.getenv("ANTHROPIC_API_KEY") == "") {
-    .cc_ln(.cc_error("ANTHROPIC_API_KEY environment variable not set"))
-    .cc_ln(.cc_info("Set it with: Sys.setenv(ANTHROPIC_API_KEY = 'your-key')"))
-    stop("ANTHROPIC_API_KEY required for stream_thinking", call. = FALSE)
   }
 
   # Get the persistent pipe context
@@ -1476,7 +1451,7 @@ claude_pipe <- function(.data,
     if (!is.null(context_info)) " You may also reference any objects from previous pipe operations." else ""
   )
 
-  if (verbose || stream_thinking) {
+  if (verbose) {
     cat("\n")
     .cc_ln(.cc_header("Claude Pipe"))
     cat("\n")
@@ -1486,10 +1461,6 @@ claude_pipe <- function(.data,
     }
     .cc_ln(.cc_kv("Prompt", if (nchar(prompt) > 50) paste0(substr(prompt, 1, 50), "...") else prompt))
     .cc_ln(.cc_kv("Execute", execute))
-    if (stream_thinking) {
-      .cc_ln(.cc_kv("Stream thinking", "enabled"))
-      .cc_ln(.cc_kv("Thinking budget", thinking_budget))
-    }
     ctx_objs <- ls(pipe_ctx, all.names = FALSE)
     if (length(ctx_objs) > 0) {
       .cc_ln(.cc_kv("Context objects", paste(ctx_objs, collapse = ", ")))
@@ -1502,30 +1473,9 @@ claude_pipe <- function(.data,
   response <- NULL
   last_error <- NULL
 
-  # Helper function to call Claude (either via CLI or direct API)
-  call_claude <- function(prompt_text, sys_prompt) {
-    if (stream_thinking) {
-      # Use direct API with streaming thinking
-      messages <- list(list(role = "user", content = prompt_text))
-      api_model <- model %||% "claude-sonnet-4-5-20250929"
-      claudeR(
-        prompt = messages,
-        model = api_model,
-        max_tokens = thinking_budget * 2,
-        system_prompt = sys_prompt,
-        thinking = list(type = "enabled", budget_tokens = thinking_budget),
-        stream_thinking = TRUE,
-        return_thinking = FALSE
-      )
-    } else {
-      # Use CLI
-      claude_code(prompt_text, system_prompt = sys_prompt, model = model, ...)
-    }
-  }
-
   for (attempt in seq_len(max_retries)) {
     response <- tryCatch(
-      call_claude(full_prompt, system_prompt),
+      claude_code(full_prompt, system_prompt = system_prompt, model = model, ...),
       error = function(e) {
         last_error <<- e$message
         return(NULL)
@@ -1539,7 +1489,7 @@ claude_pipe <- function(.data,
     if (attempt < max_retries) {
       # Exponential backoff: 2, 4, 8 seconds
       wait_time <- 2^attempt
-      if (verbose || stream_thinking) {
+      if (verbose) {
         .cc_ln(.cc_warn(sprintf("Claude API error: %s. Retrying in %d seconds (attempt %d/%d)...",
                                 last_error, wait_time, attempt, max_retries)))
       }
@@ -1555,10 +1505,10 @@ claude_pipe <- function(.data,
   code_blocks <- .cc_extract_r_code(response)
 
   if (length(code_blocks) == 0) {
-    if (verbose || stream_thinking) .cc_ln(.cc_warn("No R code blocks found in response"))
+    if (verbose) .cc_ln(.cc_warn("No R code blocks found in response"))
     # Try to find any code-like content
     warning("Claude did not return R code in expected format", call. = FALSE)
-    if (verbose || stream_thinking) {
+    if (verbose) {
       cat("\nClaude's response:\n")
       cat(response)
       cat("\n")
@@ -1569,7 +1519,7 @@ claude_pipe <- function(.data,
   # Combine all code blocks
   code <- paste(code_blocks, collapse = "\n\n")
 
-  if (verbose || stream_thinking) {
+  if (verbose) {
     cat("\n")
     .cc_ln(.cc_header("Generated Code"))
     cat("\n")
@@ -1593,7 +1543,7 @@ claude_pipe <- function(.data,
   execution_error <- NULL
 
   for (exec_attempt in seq_len(max_retries)) {
-    if (verbose || stream_thinking) .cc_ln(.cc_info(sprintf("Executing code (attempt %d/%d)...", exec_attempt, max_retries)))
+    if (verbose) .cc_ln(.cc_info(sprintf("Executing code (attempt %d/%d)...", exec_attempt, max_retries)))
 
     exec_result <- tryCatch({
       # Use the persistent pipe context as execution environment
@@ -1616,7 +1566,7 @@ claude_pipe <- function(.data,
       execution_success <- TRUE
       result <- exec_result$result
 
-      if (verbose || stream_thinking) {
+      if (verbose) {
         .cc_ln(.cc_success("Execution complete"))
 
         # Show new objects created
@@ -1641,7 +1591,7 @@ claude_pipe <- function(.data,
     execution_error <- exec_result$error
 
     if (exec_attempt < max_retries) {
-      if (verbose || stream_thinking) {
+      if (verbose) {
         .cc_ln(.cc_warn(sprintf("Execution failed: %s", execution_error)))
         .cc_ln(.cc_info("Asking Claude to fix the code..."))
       }
@@ -1656,11 +1606,11 @@ claude_pipe <- function(.data,
         "Original request: ", prompt
       )
 
-      # Call Claude again to fix the code (uses streaming if enabled)
+      # Call Claude again to fix the code
       retry_response <- NULL
       for (api_attempt in seq_len(max_retries)) {
         retry_response <- tryCatch(
-          call_claude(retry_prompt, system_prompt),
+          claude_code(retry_prompt, system_prompt = system_prompt, model = model, ...),
           error = function(e) NULL
         )
         if (!is.null(retry_response)) break
@@ -1673,7 +1623,7 @@ claude_pipe <- function(.data,
         new_code_blocks <- .cc_extract_r_code(retry_response)
         if (length(new_code_blocks) > 0) {
           current_code <- paste(new_code_blocks, collapse = "\n\n")
-          if (verbose || stream_thinking) {
+          if (verbose) {
             cat("\n")
             .cc_ln(.cc_header("Fixed Code"))
             cat("\n")
