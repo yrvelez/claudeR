@@ -414,6 +414,10 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
 #' @param working_dir Working directory for Claude to operate in.
 #' @param timeout Timeout in seconds.
 #' @param verbose Logical; if TRUE, print status messages.
+#' @param stream_output Logical; if TRUE, stream Claude Code's output to the
+#'   console in real-time as it runs. Stderr (status/thinking) appears in gray
+#'   via message(), stdout appears normally. Useful for seeing Claude's reasoning
+#'   process during long-running operations. Defaults to FALSE.
 #'
 #' @return Response from Claude. Character string for text output, list for JSON.
 #'
@@ -439,6 +443,9 @@ claude_pipe_context_objects <- function(verbose = TRUE) {
 #' # Restrict to specific tools
 #' claude_code("Analyze data.csv",
 #'             allowed_tools = c("Read", "Bash"))
+#'
+#' # Stream output to see Claude's reasoning in real-time
+#' claude_code("Explain the structure of this project", stream_output = TRUE)
 #' }
 #'
 #' @family claude_code
@@ -457,7 +464,8 @@ claude_code <- function(prompt,
                         permission_mode = NULL,
                         working_dir = NULL,
                         timeout = NULL,
-                        verbose = FALSE) {
+                        verbose = FALSE,
+                        stream_output = FALSE) {
 
   if (!claude_code_available()) {
     .cc_ln(.cc_error("Claude Code CLI not found"))
@@ -487,27 +495,64 @@ claude_code <- function(prompt,
   wd <- working_dir %||% getwd()
   timeout_val <- timeout %||% cfg$timeout
 
-  if (verbose) {
+  if (verbose || stream_output) {
     cat("\n")
     .cc_ln(.cc_header("Executing Claude Code"))
     cat("\n")
     .cc_ln(.cc_kv("Working Dir", wd))
     .cc_ln(.cc_kv("Timeout", paste0(timeout_val, "s")))
     .cc_ln(.cc_kv("Output Format", output_format))
+    if (stream_output) .cc_ln(.cc_kv("Stream output", "enabled"))
     cat("\n")
     .cc_ln(.cc_info("Running..."))
+    if (stream_output) cat("\n")
   }
 
   result <- tryCatch({
     if (requireNamespace("processx", quietly = TRUE)) {
-      proc <- processx::run(
-        command = cfg$path,
-        args = gsub("^'|'$", "", args),
-        wd = wd,
-        timeout = timeout_val,
-        error_on_status = FALSE
-      )
-      list(stdout = proc$stdout, stderr = proc$stderr, status = proc$status)
+      if (stream_output) {
+        # Use callbacks to stream output in real-time
+        stdout_chunks <- character(0)
+        stderr_chunks <- character(0)
+
+        stdout_callback <- function(chunk, proc) {
+          stdout_chunks <<- c(stdout_chunks, chunk)
+          cat(chunk)
+        }
+
+        stderr_callback <- function(chunk, proc) {
+          stderr_chunks <<- c(stderr_chunks, chunk)
+          # Use message() for gray text on stderr
+          message(chunk, appendLF = FALSE)
+        }
+
+        proc <- processx::run(
+          command = cfg$path,
+          args = gsub("^'|'$", "", args),
+          wd = wd,
+          timeout = timeout_val,
+          error_on_status = FALSE,
+          stdout_callback = stdout_callback,
+          stderr_callback = stderr_callback
+        )
+
+        if (stream_output) cat("\n")
+        list(
+          stdout = paste(stdout_chunks, collapse = ""),
+          stderr = paste(stderr_chunks, collapse = ""),
+          status = proc$status
+        )
+      } else {
+        # Non-streaming: capture all output at end
+        proc <- processx::run(
+          command = cfg$path,
+          args = gsub("^'|'$", "", args),
+          wd = wd,
+          timeout = timeout_val,
+          error_on_status = FALSE
+        )
+        list(stdout = proc$stdout, stderr = proc$stderr, status = proc$status)
+      }
     } else {
       stdout_file <- tempfile()
       stderr_file <- tempfile()
@@ -528,7 +573,7 @@ claude_code <- function(prompt,
     stop("Claude Code execution failed: ", e$message, call. = FALSE)
   })
 
-  if (verbose) {
+  if (verbose || stream_output) {
     if (result$status == 0) .cc_ln(.cc_success("Complete"))
     else .cc_ln(.cc_warn(paste("Exit status:", result$status)))
     cat("\n")
@@ -1334,6 +1379,10 @@ for (i in seq_along(code_blocks)) {
 #'   calling environment, which allows the result to access piped data.
 #' @param model Model to use (overrides default from config).
 #' @param verbose Logical; if TRUE, print status messages and show generated code.
+#' @param stream_output Logical; if TRUE, stream Claude Code's output to the
+#'   console in real-time as it runs. Shows Claude's reasoning process during
+#'   code generation. Stderr appears in gray via message(), stdout appears normally.
+#'   Defaults to FALSE.
 #' @param max_retries Maximum number of retry attempts for Claude API calls and
 #'   code execution failures. Defaults to 3. When code execution fails, Claude
 #'   is re-prompted with the error message to fix the code.
@@ -1393,6 +1442,9 @@ for (i in seq_along(code_blocks)) {
 #'
 #' # Verbose mode to see what's happening
 #' mtcars |> claude_pipe("Fit a linear model of mpg ~ wt", verbose = TRUE)
+#'
+#' # Stream Claude's reasoning process in real-time
+#' mtcars |> claude_pipe("Create a comprehensive analysis", stream_output = TRUE)
 #' }
 #'
 #' @family claude_code
@@ -1403,6 +1455,7 @@ claude_pipe <- function(.data,
                         envir = parent.frame(),
                         model = NULL,
                         verbose = FALSE,
+                        stream_output = FALSE,
                         max_retries = 3,
                         ...) {
 
@@ -1451,7 +1504,7 @@ claude_pipe <- function(.data,
     if (!is.null(context_info)) " You may also reference any objects from previous pipe operations." else ""
   )
 
-  if (verbose) {
+  if (verbose || stream_output) {
     cat("\n")
     .cc_ln(.cc_header("Claude Pipe"))
     cat("\n")
@@ -1461,6 +1514,7 @@ claude_pipe <- function(.data,
     }
     .cc_ln(.cc_kv("Prompt", if (nchar(prompt) > 50) paste0(substr(prompt, 1, 50), "...") else prompt))
     .cc_ln(.cc_kv("Execute", execute))
+    if (stream_output) .cc_ln(.cc_kv("Stream output", "enabled"))
     ctx_objs <- ls(pipe_ctx, all.names = FALSE)
     if (length(ctx_objs) > 0) {
       .cc_ln(.cc_kv("Context objects", paste(ctx_objs, collapse = ", ")))
@@ -1475,7 +1529,8 @@ claude_pipe <- function(.data,
 
   for (attempt in seq_len(max_retries)) {
     response <- tryCatch(
-      claude_code(full_prompt, system_prompt = system_prompt, model = model, ...),
+      claude_code(full_prompt, system_prompt = system_prompt, model = model,
+                  stream_output = stream_output, ...),
       error = function(e) {
         last_error <<- e$message
         return(NULL)
@@ -1489,7 +1544,7 @@ claude_pipe <- function(.data,
     if (attempt < max_retries) {
       # Exponential backoff: 2, 4, 8 seconds
       wait_time <- 2^attempt
-      if (verbose) {
+      if (verbose || stream_output) {
         .cc_ln(.cc_warn(sprintf("Claude API error: %s. Retrying in %d seconds (attempt %d/%d)...",
                                 last_error, wait_time, attempt, max_retries)))
       }
@@ -1505,10 +1560,10 @@ claude_pipe <- function(.data,
   code_blocks <- .cc_extract_r_code(response)
 
   if (length(code_blocks) == 0) {
-    if (verbose) .cc_ln(.cc_warn("No R code blocks found in response"))
+    if (verbose || stream_output) .cc_ln(.cc_warn("No R code blocks found in response"))
     # Try to find any code-like content
     warning("Claude did not return R code in expected format", call. = FALSE)
-    if (verbose) {
+    if (verbose || stream_output) {
       cat("\nClaude's response:\n")
       cat(response)
       cat("\n")
@@ -1519,7 +1574,7 @@ claude_pipe <- function(.data,
   # Combine all code blocks
   code <- paste(code_blocks, collapse = "\n\n")
 
-  if (verbose) {
+  if (verbose || stream_output) {
     cat("\n")
     .cc_ln(.cc_header("Generated Code"))
     cat("\n")
@@ -1543,7 +1598,7 @@ claude_pipe <- function(.data,
   execution_error <- NULL
 
   for (exec_attempt in seq_len(max_retries)) {
-    if (verbose) .cc_ln(.cc_info(sprintf("Executing code (attempt %d/%d)...", exec_attempt, max_retries)))
+    if (verbose || stream_output) .cc_ln(.cc_info(sprintf("Executing code (attempt %d/%d)...", exec_attempt, max_retries)))
 
     exec_result <- tryCatch({
       # Use the persistent pipe context as execution environment
@@ -1566,7 +1621,7 @@ claude_pipe <- function(.data,
       execution_success <- TRUE
       result <- exec_result$result
 
-      if (verbose) {
+      if (verbose || stream_output) {
         .cc_ln(.cc_success("Execution complete"))
 
         # Show new objects created
@@ -1591,7 +1646,7 @@ claude_pipe <- function(.data,
     execution_error <- exec_result$error
 
     if (exec_attempt < max_retries) {
-      if (verbose) {
+      if (verbose || stream_output) {
         .cc_ln(.cc_warn(sprintf("Execution failed: %s", execution_error)))
         .cc_ln(.cc_info("Asking Claude to fix the code..."))
       }
@@ -1606,11 +1661,12 @@ claude_pipe <- function(.data,
         "Original request: ", prompt
       )
 
-      # Call Claude again to fix the code
+      # Call Claude again to fix the code (with streaming if enabled)
       retry_response <- NULL
       for (api_attempt in seq_len(max_retries)) {
         retry_response <- tryCatch(
-          claude_code(retry_prompt, system_prompt = system_prompt, model = model, ...),
+          claude_code(retry_prompt, system_prompt = system_prompt, model = model,
+                      stream_output = stream_output, ...),
           error = function(e) NULL
         )
         if (!is.null(retry_response)) break
@@ -1623,7 +1679,7 @@ claude_pipe <- function(.data,
         new_code_blocks <- .cc_extract_r_code(retry_response)
         if (length(new_code_blocks) > 0) {
           current_code <- paste(new_code_blocks, collapse = "\n\n")
-          if (verbose) {
+          if (verbose || stream_output) {
             cat("\n")
             .cc_ln(.cc_header("Fixed Code"))
             cat("\n")
@@ -1634,7 +1690,7 @@ claude_pipe <- function(.data,
       }
     } else {
       .cc_ln(.cc_error(paste("Execution failed after", max_retries, "attempts:", execution_error)))
-      if (verbose) {
+      if (verbose || stream_output) {
         cat("\nFailed code:\n")
         cat(current_code)
         cat("\n")
