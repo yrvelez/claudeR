@@ -1334,6 +1334,9 @@ for (i in seq_along(code_blocks)) {
 #'   calling environment, which allows the result to access piped data.
 #' @param model Model to use (overrides default from config).
 #' @param verbose Logical; if TRUE, print status messages and show generated code.
+#' @param max_retries Maximum number of retry attempts for Claude API calls and
+#'   code execution failures. Defaults to 3. When code execution fails, Claude
+#'   is re-prompted with the error message to fix the code.
 #' @param ... Additional arguments passed to \code{claude_code}.
 #'
 #' @return If \code{execute = TRUE}, returns the result of executing the
@@ -1344,12 +1347,17 @@ for (i in seq_along(code_blocks)) {
 #' The function works by:
 #' \enumerate{
 #'   \item Serializing the input data (showing structure and head for data frames)
-#'   \item Sending the data representation and prompt to Claude
+#'   \item Sending the data representation and prompt to Claude (with retry on failure)
 #'   \item Extracting R code from Claude's response
 #'   \item Executing the code in a persistent pipe context environment
+#'   \item If execution fails, re-prompting Claude with the error to fix the code
 #'   \item Storing any created objects in the context for future pipes
 #'   \item Returning the result
 #' }
+#'
+#' Retry logic with exponential backoff is applied to both API calls and code
+#' execution. When code execution fails, Claude receives the error message and
+#' original code, and attempts to generate corrected code.
 #'
 #' The input data is available in the generated code as \code{.data}, allowing
 #' Claude to reference it directly. For data frames, Claude also receives
@@ -1395,6 +1403,7 @@ claude_pipe <- function(.data,
                         envir = parent.frame(),
                         model = NULL,
                         verbose = FALSE,
+                        max_retries = 3,
                         ...) {
 
   if (!claude_code_available()) {
@@ -1460,14 +1469,35 @@ claude_pipe <- function(.data,
     .cc_ln(.cc_info("Sending to Claude..."))
   }
 
-  # Call Claude
-  response <- tryCatch(
-    claude_code(full_prompt, system_prompt = system_prompt, model = model, ...),
-    error = function(e) {
-      .cc_ln(.cc_error(paste("Claude API error:", e$message)))
-      return(NULL)
+  # Call Claude with retry logic
+  response <- NULL
+  last_error <- NULL
+
+  for (attempt in seq_len(max_retries)) {
+    response <- tryCatch(
+      claude_code(full_prompt, system_prompt = system_prompt, model = model, ...),
+      error = function(e) {
+        last_error <<- e$message
+        return(NULL)
+      }
+    )
+
+    if (!is.null(response)) {
+      break
     }
-  )
+
+    if (attempt < max_retries) {
+      # Exponential backoff: 2, 4, 8 seconds
+      wait_time <- 2^attempt
+      if (verbose) {
+        .cc_ln(.cc_warn(sprintf("Claude API error: %s. Retrying in %d seconds (attempt %d/%d)...",
+                                last_error, wait_time, attempt, max_retries)))
+      }
+      Sys.sleep(wait_time)
+    } else {
+      .cc_ln(.cc_error(paste("Claude API error after", max_retries, "attempts:", last_error)))
+    }
+  }
 
   if (is.null(response)) return(invisible(NULL))
 
@@ -1503,53 +1533,115 @@ claude_pipe <- function(.data,
     return(code)
   }
 
-  # Execute the code
-  if (verbose) .cc_ln(.cc_info("Executing code..."))
-
+  # Execute the code with retry logic
   # Track objects before execution to identify new ones
   objects_before <- ls(pipe_ctx, all.names = FALSE)
 
-  result <- tryCatch({
-    # Use the persistent pipe context as execution environment
-    # Set .data in the context for this execution
-    pipe_ctx$.data <- .data
+  result <- NULL
+  execution_success <- FALSE
+  current_code <- code
+  execution_error <- NULL
 
-    # Parse and evaluate in the pipe context
-    parsed <- parse(text = code)
-    eval_result <- NULL
-    for (expr in parsed) {
-      eval_result <- eval(expr, envir = pipe_ctx)
-    }
+  for (exec_attempt in seq_len(max_retries)) {
+    if (verbose) .cc_ln(.cc_info(sprintf("Executing code (attempt %d/%d)...", exec_attempt, max_retries)))
 
-    if (verbose) {
-      .cc_ln(.cc_success("Execution complete"))
+    exec_result <- tryCatch({
+      # Use the persistent pipe context as execution environment
+      # Set .data in the context for this execution
+      pipe_ctx$.data <- .data
 
-      # Show new objects created
+      # Parse and evaluate in the pipe context
+      parsed <- parse(text = current_code)
+      eval_result <- NULL
+      for (expr in parsed) {
+        eval_result <- eval(expr, envir = pipe_ctx)
+      }
+
+      list(success = TRUE, result = eval_result, error = NULL)
+    }, error = function(e) {
+      list(success = FALSE, result = NULL, error = e$message)
+    })
+
+    if (exec_result$success) {
+      execution_success <- TRUE
+      result <- exec_result$result
+
+      if (verbose) {
+        .cc_ln(.cc_success("Execution complete"))
+
+        # Show new objects created
+        objects_after <- ls(pipe_ctx, all.names = FALSE)
+        new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
+        if (length(new_objects) > 0) {
+          .cc_ln(.cc_info(paste("Objects created in R environment:", paste(new_objects, collapse = ", "))))
+        }
+      }
+
+      # Copy new objects to the global environment so they're accessible to the user
       objects_after <- ls(pipe_ctx, all.names = FALSE)
       new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
-      if (length(new_objects) > 0) {
-        .cc_ln(.cc_info(paste("Objects created in R environment:", paste(new_objects, collapse = ", "))))
+      for (obj_name in new_objects) {
+        assign(obj_name, get(obj_name, envir = pipe_ctx), envir = .GlobalEnv)
       }
+
+      break
     }
 
-    # Copy new objects to the global environment so they're accessible to the user
-    objects_after <- ls(pipe_ctx, all.names = FALSE)
-    new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
-    for (obj_name in new_objects) {
-      assign(obj_name, get(obj_name, envir = pipe_ctx), envir = .GlobalEnv)
-    }
+    # Execution failed - try to get Claude to fix the code
+    execution_error <- exec_result$error
 
-    eval_result
-  }, error = function(e) {
-    .cc_ln(.cc_error(paste("Execution failed:", e$message)))
-    if (verbose) {
-      cat("\nFailed code:\n")
-      cat(code)
-      cat("\n")
+    if (exec_attempt < max_retries) {
+      if (verbose) {
+        .cc_ln(.cc_warn(sprintf("Execution failed: %s", execution_error)))
+        .cc_ln(.cc_info("Asking Claude to fix the code..."))
+      }
+
+      # Build a retry prompt with the error information
+      retry_prompt <- paste0(
+        "The previous code you generated resulted in an error when executed.\n\n",
+        "<previous_code>\n", current_code, "\n</previous_code>\n\n",
+        "<error>\n", execution_error, "\n</error>\n\n",
+        "Please fix the code to resolve this error. ",
+        "The data is still available in the variable `.data`. ",
+        "Original request: ", prompt
+      )
+
+      # Call Claude again to fix the code
+      retry_response <- NULL
+      for (api_attempt in seq_len(max_retries)) {
+        retry_response <- tryCatch(
+          claude_code(retry_prompt, system_prompt = system_prompt, model = model, ...),
+          error = function(e) NULL
+        )
+        if (!is.null(retry_response)) break
+        if (api_attempt < max_retries) {
+          Sys.sleep(2^api_attempt)
+        }
+      }
+
+      if (!is.null(retry_response)) {
+        new_code_blocks <- .cc_extract_r_code(retry_response)
+        if (length(new_code_blocks) > 0) {
+          current_code <- paste(new_code_blocks, collapse = "\n\n")
+          if (verbose) {
+            cat("\n")
+            .cc_ln(.cc_header("Fixed Code"))
+            cat("\n")
+            cat(current_code)
+            cat("\n\n")
+          }
+        }
+      }
+    } else {
+      .cc_ln(.cc_error(paste("Execution failed after", max_retries, "attempts:", execution_error)))
+      if (verbose) {
+        cat("\nFailed code:\n")
+        cat(current_code)
+        cat("\n")
+      }
+      warning("Code execution failed after ", max_retries, " attempts: ", execution_error, call. = FALSE)
     }
-    warning("Code execution failed: ", e$message, call. = FALSE)
-    invisible(NULL)
-  })
+  }
 
   result
 }
