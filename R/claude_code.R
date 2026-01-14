@@ -1412,15 +1412,69 @@ claude_pipe <- function(.data,
     stop("Claude Code CLI not available", call. = FALSE)
   }
 
+ # Input validation
+  if (is.null(.data)) {
+    stop(
+      "Cannot pipe NULL data to Claude.\n\n",
+      "Make sure your data object exists and is not NULL.\n",
+      "Check: is.null(your_data) should return FALSE",
+      call. = FALSE
+    )
+  }
+
+  if (missing(prompt) || is.null(prompt) || !nzchar(trimws(prompt))) {
+    stop(
+      "A prompt is required for claude_pipe().\n\n",
+      "Example: data |> claude_pipe('create a scatter plot of x vs y')",
+      call. = FALSE
+    )
+  }
+
+  if (!is.character(prompt) || length(prompt) != 1) {
+    stop(
+      "The prompt must be a single character string.\n\n",
+      "Example: data |> claude_pipe('summarize this data')",
+      call. = FALSE
+    )
+  }
+
+  # Warn about empty data frames
+  if (is.data.frame(.data) && nrow(.data) == 0) {
+    warning(
+      "The piped data frame has 0 rows. Claude will work with an empty structure.\n",
+      "Consider checking your data with: nrow(your_data)",
+      call. = FALSE
+    )
+  }
+
+  # Warn about very long prompts (may cause issues)
+  prompt_words <- length(strsplit(prompt, "\\s+")[[1]])
+  if (prompt_words > 50) {
+    warning(
+      sprintf("Your prompt has %d words. Very long prompts may lead to errors.\n", prompt_words),
+      "Consider breaking complex requests into simpler steps.",
+      call. = FALSE
+    )
+  }
+
   # Get the persistent pipe context
   pipe_ctx <- claude_pipe_context()
 
   # Check for stacked pipes (chained pipe operations)
   # If .original_data already exists, this means we're in a stacked pipe scenario
   if (exists(".original_data", envir = pipe_ctx)) {
-    stop("Stacked pipes are not yet supported. This functionality is still being worked on. ",
-         "Please use separate pipe calls instead of chaining them together.",
-         call. = FALSE)
+    stop(
+      "Stacked pipes are not yet supported.\n\n",
+      "Instead of chaining pipes like:\n",
+      "  data |> claude_pipe('step 1') |> claude_pipe('step 2')\n\n",
+      "Please use separate calls:\n",
+      "  result1 <- data |> claude_pipe('step 1')\n",
+      "  result2 <- result1 |> claude_pipe('step 2')\n\n",
+      "Or combine steps in a single prompt:\n",
+      "  data |> claude_pipe('step 1, then step 2')\n\n",
+      "Tip: Use claude_pipe_context_clear() to reset between independent analyses.",
+      call. = FALSE
+    )
   }
 
   # Store original data in context if this is a data frame and we don't already have original data
@@ -1496,6 +1550,7 @@ claude_pipe <- function(.data,
       Sys.sleep(wait_time)
     } else {
       .cc_ln(.cc_error(paste("Claude API error after", max_retries, "attempts:", last_error)))
+      .cc_pipe_failure_guidance("api", prompt, verbose)
     }
   }
 
@@ -1505,14 +1560,26 @@ claude_pipe <- function(.data,
   code_blocks <- .cc_extract_r_code(response)
 
   if (length(code_blocks) == 0) {
-    if (verbose) .cc_ln(.cc_warn("No R code blocks found in response"))
-    # Try to find any code-like content
-    warning("Claude did not return R code in expected format", call. = FALSE)
+    .cc_ln(.cc_warn("No R code blocks found in Claude's response"))
+    cat("\n")
+    .cc_ln("Claude responded but did not generate executable R code.")
+    .cc_ln("This can happen when:")
+    .cc_ln("  - The request is ambiguous or too vague")
+    .cc_ln("  - The request asks for information rather than code")
+    .cc_ln("  - Claude needs clarification about the data or task")
+    cat("\n")
+    .cc_ln("Try being more specific. Instead of:")
+    .cc_ln("  'analyze this' -> 'calculate the mean of each numeric column'")
+    .cc_ln("  'make a plot'  -> 'create a scatter plot of mpg vs wt'")
+    cat("\n")
     if (verbose) {
-      cat("\nClaude's response:\n")
+      .cc_ln(.cc_info("Claude's response:"))
       cat(response)
       cat("\n")
+    } else {
+      .cc_ln(.cc_info("Use verbose = TRUE to see Claude's full response"))
     }
+    warning("Claude did not return R code in expected format. Try simplifying your request.", call. = FALSE)
     return(invisible(NULL))
   }
 
@@ -1639,6 +1706,7 @@ claude_pipe <- function(.data,
         cat(current_code)
         cat("\n")
       }
+      .cc_pipe_failure_guidance("execution", prompt, verbose, execution_error)
       warning("Code execution failed after ", max_retries, " attempts: ", execution_error, call. = FALSE)
     }
   }
@@ -1649,8 +1717,21 @@ claude_pipe <- function(.data,
 #' @rdname claude_pipe
 #' @export
 `%|c>%` <- function(.data, prompt) {
-
-  claude_pipe(.data, prompt)
+  tryCatch(
+    claude_pipe(.data, prompt),
+    error = function(e) {
+      # Re-throw with additional context for pipe operator usage
+      if (grepl("Stacked pipes", e$message)) {
+        stop(e$message, call. = FALSE)
+      }
+      stop(
+        "Pipe operation failed: ", e$message, "\n\n",
+        "Tip: For complex operations, try using claude_pipe() directly with verbose = TRUE:\n",
+        "  result <- claude_pipe(your_data, 'your request', verbose = TRUE)",
+        call. = FALSE
+      )
+    }
+  )
 }
 
 # Helper: Prepare data representation for Claude
@@ -1853,4 +1934,65 @@ claude_pipe <- function(.data,
   } else {
     .cc_ln(.cc_error(sprintf("Block %d failed: %s", block_num, result$error)))
   }
+}
+
+# Helper: Provide user-friendly guidance when pipe operations fail
+.cc_pipe_failure_guidance <- function(failure_type, prompt, verbose = FALSE, error_msg = NULL) {
+  cat("\n")
+  .cc_ln(.cc_warn("--- Troubleshooting Tips ---"))
+  cat("\n")
+
+  prompt_length <- nchar(prompt)
+  prompt_words <- length(strsplit(prompt, "\\s+")[[1]])
+
+  if (failure_type == "api") {
+    .cc_ln("The Claude API could not process this request. Consider:")
+    cat("\n")
+    .cc_ln("  1. Simplify your prompt - break complex requests into smaller steps")
+    if (prompt_words > 30) {
+      .cc_ln(sprintf("     (Your prompt has %d words - try keeping it under 20)", prompt_words))
+    }
+    .cc_ln("  2. Check your network connection and API key")
+    .cc_ln("  3. Try again in a few moments (API may be temporarily overloaded)")
+    .cc_ln("  4. Use verbose = TRUE to see more details")
+    cat("\n")
+    .cc_ln("Example of simplifying a complex chain:")
+    .cc_ln("  Instead of: data |> claude_pipe('filter, transform, plot, and summarize')")
+    .cc_ln("  Try:        data |> claude_pipe('filter rows where x > 5')")
+    .cc_ln("              result |> claude_pipe('create a scatter plot')")
+
+  } else if (failure_type == "execution") {
+    .cc_ln("The generated R code failed to execute. Consider:")
+    cat("\n")
+    .cc_ln("  1. Simplify your request - ask for one operation at a time")
+    .cc_ln("  2. Be more specific about column names or data structure")
+    .cc_ln("  3. Check that required packages are installed")
+    .cc_ln("  4. Use verbose = TRUE to see the generated code")
+    cat("\n")
+
+    # Provide context-specific hints based on common error patterns
+    if (!is.null(error_msg)) {
+      if (grepl("could not find function", error_msg, ignore.case = TRUE)) {
+        .cc_ln("  Hint: A required package may not be loaded. Try specifying the package")
+        .cc_ln("        in your prompt, e.g., 'using ggplot2, create a plot'")
+      } else if (grepl("object.*not found", error_msg, ignore.case = TRUE)) {
+        .cc_ln("  Hint: A variable or column may be misspelled. Check your data's")
+        .cc_ln("        column names with names(your_data) or colnames(your_data)")
+      } else if (grepl("unexpected", error_msg, ignore.case = TRUE)) {
+        .cc_ln("  Hint: The generated code has a syntax error. Try rephrasing")
+        .cc_ln("        your request more simply")
+      }
+      cat("\n")
+    }
+
+    .cc_ln("Example of breaking down a complex task:")
+    .cc_ln("  Instead of: 'fit a model, check assumptions, and plot diagnostics'")
+    .cc_ln("  Try step 1: 'fit a linear model of mpg ~ wt'")
+    .cc_ln("  Then step 2: 'show the model summary'")
+    .cc_ln("  Then step 3: 'create diagnostic plots'")
+  }
+
+  cat("\n")
+  .cc_ln("For more help: https://github.com/yrvelez/claudeR")
+  cat("\n")
 }
