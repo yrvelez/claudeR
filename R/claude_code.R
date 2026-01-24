@@ -32,6 +32,73 @@ NULL
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+# Helper: Display code in a nicely formatted box that can be copied/stashed
+.cc_code_box <- function(code, title = "Generated R Script", step_num = NULL, width = 70) {
+  # Top border
+  cat("\n")
+  if (!is.null(step_num)) {
+    header <- sprintf(" Step %d: %s ", step_num, title)
+  } else {
+    header <- sprintf(" %s ", title)
+  }
+  header_len <- nchar(header)
+  left_border <- floor((width - header_len) / 2)
+  right_border <- width - header_len - left_border
+  cat(paste0("\u250C", strrep("\u2500", left_border), header, strrep("\u2500", right_border), "\u2510\n"))
+
+  # Code lines
+  code_lines <- strsplit(code, "\n")[[1]]
+  for (line in code_lines) {
+    # Truncate if too long
+    if (nchar(line) > width - 4) {
+      line <- paste0(substr(line, 1, width - 7), "...")
+    }
+    padding <- width - nchar(line) - 2
+    cat(paste0("\u2502 ", line, strrep(" ", max(0, padding)), "\u2502\n"))
+  }
+
+  # Bottom border
+  cat(paste0("\u2514", strrep("\u2500", width), "\u2518\n"))
+}
+
+# Helper: Display a complete stashable script from pipe chain
+.cc_stashable_script <- function(steps, prompts, data_name = "data") {
+  cat("\n")
+  .cc_ln(.cc_header("Complete Script (Ready to Stash)", width = 70))
+  cat("\n")
+  .cc_ln(.cc_info("Copy the script below to save for later use:"))
+  cat("\n")
+  cat(paste0(strrep("=", 70), "\n"))
+
+  # Header comment
+  cat("# Claude-generated R script\n")
+  cat(sprintf("# Generated: %s\n", Sys.time()))
+  cat(sprintf("# Steps: %d\n", length(steps)))
+  cat("\n")
+
+  for (i in seq_along(steps)) {
+    cat(sprintf("# Step %d: %s\n", i, prompts[i]))
+    cat(steps[[i]])
+    cat("\n\n")
+  }
+
+  cat(paste0(strrep("=", 70), "\n"))
+  cat("\n")
+}
+
+# Helper: Display step summary in a pipe chain
+.cc_step_summary <- function(step_num, prompt, status = "pending") {
+  icon <- switch(status,
+    "pending" = "\u25CB",    # Empty circle
+    "running" = "\u25D4",    # Circle with right half black
+    "complete" = "\u25CF",   # Filled circle
+    "error" = "\u2717",      # X mark
+    "\u25CB"
+  )
+  .cc_ln(sprintf("  %s Step %d: %s", icon, step_num,
+                 if (nchar(prompt) > 50) paste0(substr(prompt, 1, 47), "...") else prompt))
+}
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -233,6 +300,13 @@ claude_pipe_context <- function() {
 claude_pipe_context_clear <- function(verbose = TRUE) {
   ctx <- claude_pipe_context()
   rm(list = ls(ctx, all.names = TRUE), envir = ctx)
+  # Also clear step tracking in config
+  if (exists(".claude_code_config", envir = .GlobalEnv)) {
+    cfg <- get(".claude_code_config", envir = .GlobalEnv)
+    cfg$pipe_steps <- list()
+    cfg$pipe_prompts <- character(0)
+    cfg$pipe_step_count <- 0
+  }
   if (verbose) .cc_ln(.cc_success("Pipe context cleared"))
   invisible(TRUE)
 }
@@ -251,6 +325,68 @@ claude_pipe_context_clear <- function(verbose = TRUE) {
 #' claude_pipe_context_objects()
 #' }
 #'
+#' Get the complete generated script from pipe operations
+#'
+#' Returns the complete R script generated from all pipe operations in the
+#' current chain. This is useful for saving or "stashing" the generated code
+#' for later use.
+#'
+#' @param print Logical; if TRUE (default), prints the script nicely formatted.
+#' @return A character string containing the complete script (invisibly if print = TRUE).
+#'
+#' @examples
+#' \dontrun{
+#' # After running some pipe operations
+#' mtcars |> claude_pipe("Calculate mean mpg by cyl")
+#'
+#' # Get the generated script
+#' script <- claude_pipe_script()
+#'
+#' # Save to file
+#' writeLines(claude_pipe_script(print = FALSE), "my_analysis.R")
+#' }
+#'
+#' @family claude_code
+#' @export
+claude_pipe_script <- function(print = TRUE) {
+  if (!exists(".claude_code_config", envir = .GlobalEnv)) {
+    if (print) .cc_ln(.cc_info("No pipe operations have been performed yet"))
+    return(invisible(""))
+  }
+
+  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+
+  if (is.null(cfg$pipe_steps) || length(cfg$pipe_steps) == 0) {
+    if (print) .cc_ln(.cc_info("No pipe operations have been performed yet"))
+    return(invisible(""))
+  }
+
+  # Build the complete script
+  script_parts <- c(
+    "# Claude-generated R script",
+    sprintf("# Generated: %s", Sys.time()),
+    sprintf("# Steps: %d", length(cfg$pipe_steps)),
+    ""
+  )
+
+  for (i in seq_along(cfg$pipe_steps)) {
+    prompt <- if (i <= length(cfg$pipe_prompts)) cfg$pipe_prompts[i] else "Step"
+    script_parts <- c(script_parts,
+      sprintf("# Step %d: %s", i, prompt),
+      cfg$pipe_steps[[i]],
+      ""
+    )
+  }
+
+  script <- paste(script_parts, collapse = "\n")
+
+  if (print) {
+    .cc_stashable_script(cfg$pipe_steps, cfg$pipe_prompts)
+  }
+
+  invisible(script)
+}
+
 #' @family claude_code
 #' @export
 claude_pipe_context_objects <- function(verbose = TRUE) {
@@ -1460,26 +1596,20 @@ claude_pipe <- function(.data,
   # Get the persistent pipe context
   pipe_ctx <- claude_pipe_context()
 
-  # Check for stacked pipes (chained pipe operations)
-  # If .original_data already exists, this means we're in a stacked pipe scenario
-  if (exists(".original_data", envir = pipe_ctx)) {
-    stop(
-      "Stacked pipes are not yet supported.\n\n",
-      "Instead of chaining pipes like:\n",
-      "  data |> claude_pipe('step 1') |> claude_pipe('step 2')\n\n",
-      "Please use separate calls:\n",
-      "  result1 <- data |> claude_pipe('step 1')\n",
-      "  result2 <- result1 |> claude_pipe('step 2')\n\n",
-      "Or combine steps in a single prompt:\n",
-      "  data |> claude_pipe('step 1, then step 2')\n\n",
-      "Tip: Use claude_pipe_context_clear() to reset between independent analyses.",
-      call. = FALSE
-    )
-  }
+  # Get or initialize step tracking in config
+  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  if (is.null(cfg$pipe_steps)) cfg$pipe_steps <- list()
+  if (is.null(cfg$pipe_prompts)) cfg$pipe_prompts <- character(0)
+  if (is.null(cfg$pipe_step_count)) cfg$pipe_step_count <- 0
+
+  # Determine if this is a chained pipe (continuation of an existing chain)
+  is_chained <- exists(".original_data", envir = pipe_ctx)
+  current_step <- cfg$pipe_step_count + 1
+  cfg$pipe_step_count <- current_step
 
   # Store original data in context if this is a data frame and we don't already have original data
   # This preserves the initial piped data for subsequent operations in a chain
-  if (is.data.frame(.data) && !exists(".original_data", envir = pipe_ctx)) {
+  if (is.data.frame(.data) && !is_chained) {
     pipe_ctx$.original_data <- .data
     pipe_ctx$.original_data_name <- deparse(substitute(.data))
   }
@@ -1507,8 +1637,13 @@ claude_pipe <- function(.data,
 
   if (verbose) {
     cat("\n")
-    .cc_ln(.cc_header("Claude Pipe"))
+    if (is_chained) {
+      .cc_ln(.cc_header(sprintf("Claude Pipe - Step %d", current_step)))
+    } else {
+      .cc_ln(.cc_header("Claude Pipe"))
+    }
     cat("\n")
+    .cc_ln(.cc_kv("Step", current_step))
     .cc_ln(.cc_kv("Data type", class(.data)[1]))
     if (is.data.frame(.data)) {
       .cc_ln(.cc_kv("Dimensions", sprintf("%d x %d", nrow(.data), ncol(.data))))
@@ -1520,7 +1655,7 @@ claude_pipe <- function(.data,
       .cc_ln(.cc_kv("Context objects", paste(ctx_objs, collapse = ", ")))
     }
     cat("\n")
-    .cc_ln(.cc_info("Sending to Claude..."))
+    .cc_ln(.cc_info(sprintf("Sending Step %d to Claude...", current_step)))
   }
 
   # Call Claude with retry logic
@@ -1586,17 +1721,21 @@ claude_pipe <- function(.data,
   # Combine all code blocks
   code <- paste(code_blocks, collapse = "\n\n")
 
+  # Store this step's code and prompt for stashable script
+  cfg$pipe_steps[[current_step]] <- code
+  cfg$pipe_prompts[current_step] <- prompt
+
   if (verbose) {
-    cat("\n")
-    .cc_ln(.cc_header("Generated Code"))
-    cat("\n")
-    cat(code)
-    cat("\n\n")
+    .cc_code_box(code, title = prompt, step_num = current_step)
   }
 
   # Return code if not executing
 
   if (!execute) {
+    # Show stashable script summary for non-executing mode
+    if (verbose && current_step > 0) {
+      .cc_stashable_script(cfg$pipe_steps, cfg$pipe_prompts)
+    }
     return(code)
   }
 
@@ -1633,14 +1772,25 @@ claude_pipe <- function(.data,
       execution_success <- TRUE
       result <- exec_result$result
 
+      # Update stored code if it was fixed
+      if (current_code != code) {
+        cfg$pipe_steps[[current_step]] <- current_code
+      }
+
       if (verbose) {
-        .cc_ln(.cc_success("Execution complete"))
+        cat("\n")
+        .cc_ln(.cc_success(sprintf("Step %d executed successfully", current_step)))
 
         # Show new objects created
         objects_after <- ls(pipe_ctx, all.names = FALSE)
         new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
         if (length(new_objects) > 0) {
-          .cc_ln(.cc_info(paste("Objects created in R environment:", paste(new_objects, collapse = ", "))))
+          .cc_ln(.cc_info(paste("Objects created:", paste(new_objects, collapse = ", "))))
+        }
+
+        # Show stashable script summary
+        if (current_step >= 1) {
+          .cc_stashable_script(cfg$pipe_steps, cfg$pipe_prompts)
         }
       }
 
@@ -1691,18 +1841,16 @@ claude_pipe <- function(.data,
         if (length(new_code_blocks) > 0) {
           current_code <- paste(new_code_blocks, collapse = "\n\n")
           if (verbose) {
-            cat("\n")
-            .cc_ln(.cc_header("Fixed Code"))
-            cat("\n")
-            cat(current_code)
-            cat("\n\n")
+            .cc_code_box(current_code, title = sprintf("%s (Fixed)", prompt), step_num = current_step)
           }
         }
       }
     } else {
       .cc_ln(.cc_error(paste("Execution failed after", max_retries, "attempts:", execution_error)))
       if (verbose) {
-        cat("\nFailed code:\n")
+        cat("\n")
+        .cc_ln(.cc_header("Failed Code"))
+        cat("\n")
         cat(current_code)
         cat("\n")
       }
@@ -1720,14 +1868,11 @@ claude_pipe <- function(.data,
   tryCatch(
     claude_pipe(.data, prompt),
     error = function(e) {
-      # Re-throw with additional context for pipe operator usage
-      if (grepl("Stacked pipes", e$message)) {
-        stop(e$message, call. = FALSE)
-      }
       stop(
         "Pipe operation failed: ", e$message, "\n\n",
-        "Tip: For complex operations, try using claude_pipe() directly with verbose = TRUE:\n",
-        "  result <- claude_pipe(your_data, 'your request', verbose = TRUE)",
+        "Tip: For verbose output with step tracking, use claude_pipe() directly:\n",
+        "  result <- claude_pipe(your_data, 'your request', verbose = TRUE)\n\n",
+        "To view the generated script: claude_pipe_script()",
         call. = FALSE
       )
     }
