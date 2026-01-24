@@ -116,6 +116,15 @@ claude_code_config_print()
 claude_code_config(timeout = 600)
 ```
 
+### The Claude Pipe Operator
+
+```r
+mtcars %|c>% 
+ "Generate a figure with mpg on x axis and wt on y axis" %|c>%
+ "Facet by cylinders" %|c>%
+ "Maximize data-ink ratio"
+```
+
 ### Basic Usage
 
 ```r
@@ -133,7 +142,7 @@ claude_code("Analyze data.csv", allowed_tools = c("Read", "Bash"))
 
 ```r
 # Pipe data to Claude
-mtcars |> claude_code_pipe("Describe this dataset and suggest visualizations")
+mtcars  %|c>% "Describe this dataset and suggest visualizations"
 
 # Analyze a file
 claude_code_file("analysis.R", "Review this code for potential issues")
