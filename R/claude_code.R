@@ -61,8 +61,56 @@ NULL
   cat(paste0("\u2514", strrep("\u2500", width), "\u2518\n"))
 }
 
+# Helper: Extract the result expression from a code block
+# This identifies what value should be passed to the next step in a chain
+.cc_get_result_expression <- function(code) {
+  tryCatch({
+    parsed <- parse(text = code)
+    if (length(parsed) == 0) return(NULL)
+
+    last_expr <- parsed[[length(parsed)]]
+    last_expr_text <- trimws(deparse(last_expr, width.cutoff = 500L))
+
+    # If it's a simple symbol (variable name), return it directly
+    if (is.symbol(last_expr)) {
+      return(as.character(last_expr))
+    }
+
+    # If it's an assignment, the result is the assigned variable
+    if (is.call(last_expr)) {
+      op <- as.character(last_expr[[1]])
+      if (op %in% c("<-", "=", "<<-")) {
+        lhs <- last_expr[[2]]
+        if (is.symbol(lhs)) {
+          return(as.character(lhs))
+        }
+      }
+    }
+
+    # For complex expressions, wrap them in parentheses
+    if (length(last_expr_text) == 1 && nchar(last_expr_text) < 100) {
+      return(paste0("(", paste(last_expr_text, collapse = " "), ")"))
+    }
+
+    # For very complex expressions, use .last_result placeholder
+    return(".last_result")
+  }, error = function(e) {
+    return(".last_result")
+  })
+}
+
 # Helper: Display a complete stashable script from pipe chain
-.cc_stashable_script <- function(steps, prompts, data_name = "data") {
+.cc_stashable_script <- function(steps, prompts, data_name = NULL) {
+  # Get original data name from context if available
+  if (is.null(data_name)) {
+    ctx <- claude_pipe_context()
+    if (exists(".original_data_name", envir = ctx)) {
+      data_name <- get(".original_data_name", envir = ctx)
+    } else {
+      data_name <- "your_data"
+    }
+  }
+
   cat("\n")
   .cc_ln(.cc_header("Complete Script (Ready to Stash)", width = 70))
   cat("\n")
@@ -76,10 +124,26 @@ NULL
   cat(sprintf("# Steps: %d\n", length(steps)))
   cat("\n")
 
+  # Initialize .data with original data
+  cat(sprintf("# Initialize data (replace '%s' with your actual data if needed)\n", data_name))
+  cat(sprintf(".data <- %s\n", data_name))
+  cat("\n")
+
   for (i in seq_along(steps)) {
     cat(sprintf("# Step %d: %s\n", i, prompts[i]))
     cat(steps[[i]])
-    cat("\n\n")
+    cat("\n")
+
+    # Add chaining to next step (except for last step)
+    if (i < length(steps)) {
+      result_expr <- .cc_get_result_expression(steps[[i]])
+      if (!is.null(result_expr) && result_expr != ".last_result") {
+        cat(sprintf("\n# Chain output to next step\n.data <- %s\n", result_expr))
+      } else {
+        cat("\n# Chain output to next step (assign result manually if needed)\n# .data <- <result_from_above>\n")
+      }
+    }
+    cat("\n")
   }
 
   cat(paste0(strrep("=", 70), "\n"))
@@ -361,11 +425,22 @@ claude_pipe_script <- function(print = TRUE) {
     return(invisible(""))
   }
 
-  # Build the complete script
+  # Get original data name from context if available
+  ctx <- claude_pipe_context()
+  data_name <- if (exists(".original_data_name", envir = ctx)) {
+    get(".original_data_name", envir = ctx)
+  } else {
+    "your_data"
+  }
+
+  # Build the complete script with proper chaining
   script_parts <- c(
     "# Claude-generated R script",
     sprintf("# Generated: %s", Sys.time()),
     sprintf("# Steps: %d", length(cfg$pipe_steps)),
+    "",
+    sprintf("# Initialize data (replace '%s' with your actual data if needed)", data_name),
+    sprintf(".data <- %s", data_name),
     ""
   )
 
@@ -373,9 +448,28 @@ claude_pipe_script <- function(print = TRUE) {
     prompt <- if (i <= length(cfg$pipe_prompts)) cfg$pipe_prompts[i] else "Step"
     script_parts <- c(script_parts,
       sprintf("# Step %d: %s", i, prompt),
-      cfg$pipe_steps[[i]],
-      ""
+      cfg$pipe_steps[[i]]
     )
+
+    # Add chaining to next step (except for last step)
+    if (i < length(cfg$pipe_steps)) {
+      result_expr <- .cc_get_result_expression(cfg$pipe_steps[[i]])
+      if (!is.null(result_expr) && result_expr != ".last_result") {
+        script_parts <- c(script_parts,
+          "",
+          "# Chain output to next step",
+          sprintf(".data <- %s", result_expr)
+        )
+      } else {
+        script_parts <- c(script_parts,
+          "",
+          "# Chain output to next step (assign result manually if needed)",
+          "# .data <- <result_from_above>"
+        )
+      }
+    }
+
+    script_parts <- c(script_parts, "")
   }
 
   script <- paste(script_parts, collapse = "\n")
@@ -1965,17 +2059,22 @@ claude_pipe <- function(.data,
     "5. Keep code concise and focused on the task\n",
     "6. Do NOT include library() calls for base packages\n",
     "7. If using ggplot2, include library(ggplot2) at the start\n",
-    "8. The last expression should be the result to return (e.g., the plot or computed value)\n"
+    "8. The last expression should be the result to return (e.g., the plot or computed value)\n",
+    "9. IMPORTANT FOR CHAINING: When creating objects (models, plots, data frames), assign them to a ",
+    "named variable AND make that variable the last expression. This enables proper chaining.\n",
+    "   Example: Instead of just `lm(y ~ x, data = .data)`, use:\n",
+    "   fit <- lm(y ~ x, data = .data)\n",
+    "   fit\n"
   )
 
   context_rules <- if (has_context) {
     paste0(
-      "9. Objects from previous pipe operations are available in the environment - ",
+      "10. Objects from previous pipe operations are available in the environment - ",
       "you can reference them directly by name\n",
-      "10. When the user mentions an object from a previous step, use it directly\n",
-      "11. If creating new named objects (models, data frames, etc.), use descriptive names ",
+      "11. When the user mentions an object from a previous step, use it directly\n",
+      "12. If creating new named objects (models, data frames, etc.), use descriptive names ",
       "so they can be referenced in subsequent pipes\n",
-      "12. IMPORTANT: The original data frame that started the pipe chain is preserved as `.original_data`. ",
+      "13. IMPORTANT: The original data frame that started the pipe chain is preserved as `.original_data`. ",
       "When the user asks about columns from the original data (like mpg, cyl, etc.) but `.data` is ",
       "not a data frame (e.g., it's a plot or model), use `.original_data` instead\n\n"
     )
