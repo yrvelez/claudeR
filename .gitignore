@@ -1,1 +1,7 @@
 .Rproj.user
+.Rhistory
+.RData
+.DS_Store
+*.Rcheck/
+*.tar.gz
+CRAN-SUBMISSION

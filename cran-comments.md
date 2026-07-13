@@ -1,16 +1,17 @@
 ## R CMD check results
 
-0 errors | 0 warnings | 0 notes
+0 errors | 0 warnings | 1 note
 
 ## Test environments
 
-* Local: [your OS and R version]
-* GitHub Actions: Ubuntu 22.04, R 4.3.0
-* R-hub: Windows Server, macOS, Ubuntu
+* Local: macOS (aarch64-apple-darwin20), R 4.2.1
 
 ## Notes
 
 This is a new submission to CRAN.
+
+The local `--as-cran` check reported only that it was unable to verify the
+current time. This is an environment-specific timestamp check note.
 
 ### API Key Requirement
 

@@ -2,51 +2,123 @@
 % Please edit documentation in R/functions.R
 \name{claudeR}
 \alias{claudeR}
-\title{Interact with the Anthropics Claude API}
+\title{Interact with the Anthropic Claude Messages API}
 \usage{
 claudeR(
   prompt,
-  model = "claude-3-7-sonnet-20250219",
-  max_tokens = 100,
+  model = "sonnet",
+  max_tokens = 1024,
   stop_sequences = NULL,
-  temperature = 0.7,
-  top_k = -1,
-  top_p = -1,
+  temperature = NULL,
+  top_k = NULL,
+  top_p = NULL,
   api_key = NULL,
   system_prompt = NULL,
   thinking = NULL,
-  stream_thinking = TRUE,
-  return_thinking = FALSE
+  stream_thinking = FALSE,
+  return_thinking = FALSE,
+  stream = stream_thinking,
+  effort = NULL,
+  output_config = NULL,
+  betas = NULL,
+  return_response = FALSE,
+  base_url = getOption("claudeR.base_url", "https://api.anthropic.com"),
+  ...
 )
 }
 \arguments{
-\item{prompt}{A string vector for Claude-2, or a list for Claude-3 specifying the input for the model.}
+\item{prompt}{A single string or a non-empty list of Messages API message
+objects containing \code{role} and \code{content}.}
 
-\item{model}{The model to use for the request. Default is the latest Claude-3 model.}
+\item{model}{A Claude API model ID or a claudeR shortcut. The shortcuts are
+\code{"fable"}, \code{"opus"}, \code{"sonnet"}, and \code{"haiku"}. The default, \code{"sonnet"},
+resolves to Claude Sonnet 5 (\code{claude-sonnet-5}). Unknown model IDs are
+passed through unchanged for forward compatibility.}
 
-\item{max_tokens}{A maximum number of tokens to generate before stopping.}
+\item{max_tokens}{Maximum number of output tokens. The default is 1024.}
 
-\item{stop_sequences}{(Optional) A list of strings upon which to stop generating.}
+\item{stop_sequences}{Optional character vector of custom stop sequences.}
 
-\item{temperature}{(Optional) Amount of randomness injected into the response.}
+\item{temperature}{Optional sampling temperature. Leave \code{NULL} for current
+models; Fable 5, Opus 4.7 and later, and Sonnet 5 reject non-default
+sampling parameters.}
 
-\item{top_k}{(Optional) Only sample from the top K options for each subsequent token.}
+\item{top_k}{Optional top-K sampling value. Leave \code{NULL} for current models.}
 
-\item{top_p}{(Optional) Does nucleus sampling.}
+\item{top_p}{Optional nucleus-sampling value. Leave \code{NULL} for current models.}
 
-\item{api_key}{Your API key for authentication.}
+\item{api_key}{Anthropic API key. When \code{NULL}, reads
+\code{ANTHROPIC_API_KEY}.}
 
-\item{system_prompt}{(Optional) An optional system role specification.}
+\item{system_prompt}{Optional top-level system prompt. May be a string or
+content-block list accepted by the Messages API.}
 
-\item{thinking}{(Optional) A list with type="enabled" and budget_tokens to enable Claude's thinking mode.}
+\item{thinking}{Optional thinking configuration. Current adaptive models use
+\code{list(type = "adaptive")}; add \code{display = "summarized"} to request a
+readable summary. Fable 5 has always-on adaptive thinking and needs no
+\code{thinking} value.}
 
-\item{stream_thinking}{(Optional) Whether to stream thinking output in real-time. Default is TRUE.}
+\item{stream_thinking}{Compatibility alias for \code{stream}.}
 
-\item{return_thinking}{(Optional) Whether to include thinking output in the final response. Default is FALSE.}
+\item{return_thinking}{Whether to return a list with \code{thinking} and \code{response}
+strings. Defaults to \code{FALSE}.}
+
+\item{stream}{Whether to stream the response. Defaults to \code{FALSE}. Text is
+written as it arrives; summarized thinking is displayed when
+\code{return_thinking = TRUE}.}
+
+\item{effort}{Optional reasoning effort, passed as
+\code{output_config$effort} (for example, \code{"low"}, \code{"high"}, or \code{"xhigh"}).}
+
+\item{output_config}{Optional Messages API output configuration. This can
+include structured-output, effort, and task-budget settings.}
+
+\item{betas}{Optional character vector of Anthropic beta header names.}
+
+\item{return_response}{Return a structured \code{claude_response} list containing
+text, content blocks, model, usage, stop reason, and refusal details. Use
+this for tool use and robust stop-reason handling.}
+
+\item{base_url}{API base URL. Defaults to the \code{claudeR.base_url} option, then
+\verb{https://api.anthropic.com}.}
+
+\item{...}{Additional named Messages API body parameters, such as \code{tools},
+\code{tool_choice}, \code{metadata}, \code{fallbacks}, or \code{speed}. Core parameters cannot
+be overridden. Wrap custom one-element JSON arrays in \code{I()}; claudeR does
+this automatically for \code{stop_sequences} and common JSON Schema array fields.}
 }
 \value{
-The resulting completion up to and excluding the stop sequences.
+By default, a character string containing all text blocks. With
+\code{return_thinking = TRUE}, a list containing \code{thinking} and \code{response}.
+With \code{return_response = TRUE}, a structured \code{claude_response} list.
 }
 \description{
-Interact with the Anthropics Claude API
+Send a prompt to a current Claude model. A character prompt is automatically
+wrapped as a user message; a list can contain complete Messages API message
+objects, including multimodal content and tool results.
+}
+\examples{
+\dontrun{
+# A string prompt and the balanced current default (Claude Sonnet 5)
+claudeR("What makes an R function pure?", max_tokens = 300)
+
+# Claude Opus 4.8 with adaptive thinking
+result <- claudeR(
+  "Review this algorithm and find edge cases.",
+  model = "opus",
+  thinking = list(type = "adaptive", display = "summarized"),
+  effort = "high",
+  return_thinking = TRUE
+)
+
+# Claude Fable 5 has always-on adaptive thinking. Inspect stop_reason so a
+# successful HTTP refusal is distinguishable from an empty response.
+result <- claudeR(
+  "Plan a long-running research task.",
+  model = "fable",
+  effort = "high",
+  return_response = TRUE
+)
+result$stop_reason
+}
 }

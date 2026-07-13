@@ -167,6 +167,8 @@ NULL
 # Configuration
 # ============================================================================
 
+.claude_code_state <- new.env(parent = emptyenv())
+
 #' Configure Claude Code CLI settings
 #'
 #' Get or set configuration options for Claude Code CLI integration.
@@ -195,15 +197,14 @@ claude_code_config <- function(cli_path = NULL,
                                timeout = NULL,
                                quiet = FALSE) {
 
-  if (!exists(".claude_code_config", envir = .GlobalEnv)) {
-    assign(".claude_code_config", new.env(parent = emptyenv()), envir = .GlobalEnv)
-    cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  cfg <- .claude_code_state
+  if (!isTRUE(cfg$initialized)) {
     cfg$path <- Sys.which("claude")
     cfg$model <- NULL
     cfg$timeout <- 300
+    cfg$initialized <- TRUE
   }
 
-  cfg <- get(".claude_code_config", envir = .GlobalEnv)
   setting <- !is.null(cli_path) || !is.null(default_model) || !is.null(timeout)
 
   if (!is.null(cli_path)) cfg$path <- cli_path
@@ -330,11 +331,11 @@ claude_code_version <- function(verbose = TRUE) {
 #' @family claude_code
 #' @export
 claude_pipe_context <- function() {
-  if (!exists(".claude_code_config", envir = .GlobalEnv)) {
+  if (!isTRUE(.claude_code_state$initialized)) {
     claude_code_config(quiet = TRUE)
   }
 
-  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  cfg <- .claude_code_state
 
   if (is.null(cfg$pipe_context) || !is.environment(cfg$pipe_context)) {
     cfg$pipe_context <- new.env(parent = .GlobalEnv)
@@ -365,8 +366,8 @@ claude_pipe_context_clear <- function(verbose = TRUE) {
   ctx <- claude_pipe_context()
   rm(list = ls(ctx, all.names = TRUE), envir = ctx)
   # Also clear step tracking in config
-  if (exists(".claude_code_config", envir = .GlobalEnv)) {
-    cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  if (isTRUE(.claude_code_state$initialized)) {
+    cfg <- .claude_code_state
     cfg$pipe_steps <- list()
     cfg$pipe_prompts <- character(0)
     cfg$pipe_step_count <- 0
@@ -375,20 +376,6 @@ claude_pipe_context_clear <- function(verbose = TRUE) {
   invisible(TRUE)
 }
 
-#' List objects in the pipe context
-#'
-#' Shows all objects currently available in the pipe context from previous
-#' pipe operations.
-#'
-#' @param verbose Logical; if TRUE, print formatted object info.
-#' @return A named list with object names, classes, and brief descriptions.
-#'
-#' @examples
-#' \dontrun{
-#' # See what objects are available from previous pipes
-#' claude_pipe_context_objects()
-#' }
-#'
 #' Get the complete generated script from pipe operations
 #'
 #' Returns the complete R script generated from all pipe operations in the
@@ -413,12 +400,12 @@ claude_pipe_context_clear <- function(verbose = TRUE) {
 #' @family claude_code
 #' @export
 claude_pipe_script <- function(print = TRUE) {
-  if (!exists(".claude_code_config", envir = .GlobalEnv)) {
+  if (!isTRUE(.claude_code_state$initialized)) {
     if (print) .cc_ln(.cc_info("No pipe operations have been performed yet"))
     return(invisible(""))
   }
 
-  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  cfg <- .claude_code_state
 
   if (is.null(cfg$pipe_steps) || length(cfg$pipe_steps) == 0) {
     if (print) .cc_ln(.cc_info("No pipe operations have been performed yet"))
@@ -481,6 +468,20 @@ claude_pipe_script <- function(print = TRUE) {
   invisible(script)
 }
 
+#' List objects in the pipe context
+#'
+#' Shows all objects currently available in the pipe context from previous
+#' pipe operations.
+#'
+#' @param verbose Logical; if TRUE, print formatted object info.
+#' @return A named list with object names, classes, and brief descriptions.
+#'
+#' @examples
+#' \dontrun{
+#' # See what objects are available from previous pipes
+#' claude_pipe_context_objects()
+#' }
+#'
 #' @family claude_code
 #' @export
 claude_pipe_context_objects <- function(verbose = TRUE) {
@@ -1691,7 +1692,7 @@ claude_pipe <- function(.data,
   pipe_ctx <- claude_pipe_context()
 
   # Get or initialize step tracking in config
-  cfg <- get(".claude_code_config", envir = .GlobalEnv)
+  cfg <- .claude_code_state
   if (is.null(cfg$pipe_steps)) cfg$pipe_steps <- list()
   if (is.null(cfg$pipe_prompts)) cfg$pipe_prompts <- character(0)
   if (is.null(cfg$pipe_step_count)) cfg$pipe_step_count <- 0
@@ -1891,8 +1892,11 @@ claude_pipe <- function(.data,
       # Copy new objects to the global environment so they're accessible to the user
       objects_after <- ls(pipe_ctx, all.names = FALSE)
       new_objects <- setdiff(objects_after, c(objects_before, ".data", ".original_data", ".original_data_name"))
-      for (obj_name in new_objects) {
-        assign(obj_name, get(obj_name, envir = pipe_ctx), envir = .GlobalEnv)
+      if (length(new_objects) > 0L) {
+        list2env(
+          mget(new_objects, envir = pipe_ctx, inherits = FALSE),
+          envir = .GlobalEnv
+        )
       }
 
       break

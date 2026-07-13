@@ -16,32 +16,26 @@ knitr::opts_chunk$set(
 ```
 
 ## Introduction
-The claudeR package provides a convenient R interface to the Anthropic Claude API.
-With claudeR, you can easily generate AI-powered text responses using Claude's
-advanced language models without managing the underlying API request details.
+
+claudeR provides a compact R interface to Anthropic's Messages API. It accepts
+simple string prompts or complete message lists, supports adaptive thinking and
+streaming, exposes structured stop metadata, and can query the live Models API.
+The package also includes a separate interface to the Claude Code CLI.
 
 ## Prerequisites
 
-Before using claudeR, you need:
-
-1. An Anthropic API key (get one at <https://console.anthropic.com/>)
-2. The API key set as an environment variable
-
-### Setting your API key
-
-The recommended way to set your API key is via an environment variable:
+Create an Anthropic API key at <https://console.anthropic.com/> and make it
+available as `ANTHROPIC_API_KEY`:
 
 ```{r}
 Sys.setenv(ANTHROPIC_API_KEY = "your-api-key-here")
 ```
 
-For persistent use, add this to your `.Renviron` file:
+For persistent use, add the following line to `.Renviron` instead:
 
 ```
 ANTHROPIC_API_KEY=your-api-key-here
 ```
-
-## Basic Usage
 
 Load the package:
 
@@ -49,105 +43,197 @@ Load the package:
 library(claudeR)
 ```
 
-### Simple Query
+## Basic Usage
 
-For Claude 3 and newer models, prompts must be provided as a list of messages:
+A single string is automatically wrapped as a user message. The default
+`model = "sonnet"` shortcut selects Claude Sonnet 5.
+
 ```{r}
 response <- claudeR(
-  prompt = list(list(role = "user", content = "What is the capital of France?")),
-  model = "claude-sonnet-4-5-20250929",
+  "What is the capital of France?",
   max_tokens = 100
 )
 print(response)
 ```
 
-### Using a System Prompt
-
-You can provide context or instructions using a system prompt:
+Add top-level system instructions with `system_prompt`:
 
 ```{r}
 response <- claudeR(
-  prompt = list(list(role = "user", content = "Translate: Hello, how are you?")),
-  model = "claude-sonnet-4-5-20250929",
-  system_prompt = "You are a Spanish translator. Respond only with the translation.",
+  "Translate: Hello, how are you?",
+  system_prompt = "You are a Spanish translator. Return only the translation.",
   max_tokens = 100
 )
 print(response)
 ```
 
-### Multi-turn Conversations
-
-Build a conversation by including multiple messages:
+For multi-turn or multimodal requests, provide complete Messages API objects:
 
 ```{r}
 response <- claudeR(
   prompt = list(
     list(role = "user", content = "My name is Alice."),
-    list(role = "assistant", content = "Hello Alice! Nice to meet you."),
-    list(role = "user", content = "What's my name?")
+    list(role = "assistant", content = "Hello Alice!"),
+    list(role = "user", content = "What is my name?")
   ),
-  model = "claude-sonnet-4-5-20250929",
   max_tokens = 100
 )
 print(response)
 ```
 
-## Extended Thinking Mode
+## Current Models
 
-Claude supports an extended thinking mode where it can "think through" complex
-problems step by step before providing a response:
+claudeR defines four case-insensitive convenience shortcuts:
+
+| Model | Shortcut | API model ID | Typical use |
+|-------|----------|--------------|-------------|
+| Claude Fable 5 | `"fable"` | `claude-fable-5` | Highest-capability, long-running work |
+| Claude Opus 4.8 | `"opus"` | `claude-opus-4-8` | Complex agentic coding and knowledge work |
+| Claude Sonnet 5 | `"sonnet"` | `claude-sonnet-5` | Balanced speed and capability; default |
+| Claude Haiku 4.5 | `"haiku"` | `claude-haiku-4-5-20251001` | Fast, cost-efficient tasks |
+
+Full model IDs are also accepted, including IDs released after this package
+version. Starting with Claude 4.6, a dateless ID such as
+`claude-opus-4-8` is a canonical, pinned version rather than an evergreen alias.
+The Haiku shortcut resolves to its dated, pinned ID; Anthropic's shorter
+`claude-haiku-4-5` API alias is also accepted when supplied explicitly.
+
+Use `claude_models()` to inspect live availability and capabilities rather than
+depending only on a static table:
 
 ```{r}
-response <- claudeR(
-  prompt = list(list(role = "user", content = "Solve: What is 127 * 83?")),
-  model = "claude-sonnet-4-5-20250929",
-  max_tokens = 8000,
-  thinking = list(type = "enabled", budget_tokens = 5000),
-  return_thinking = TRUE
-)
+models <- claude_models(limit = 25)
+vapply(models$data, `[[`, character(1), "id")
 
-# View the thinking process
-cat("Thinking:\n", response$thinking, "\n\n")
-
-# View the final answer
-cat("Response:\n", response$response)
+# A shortcut is resolved when retrieving a single model
+opus <- claude_models("opus")
+opus$id
+opus$max_input_tokens
+opus$capabilities
 ```
 
-## Available Models
+## Adaptive Thinking and Effort
 
-claudeR supports multiple Claude model families:
+The current Fable, Opus, and Sonnet models use adaptive thinking. Use `effort`
+to tune reasoning depth; claudeR sends it as `output_config$effort`.
 
-- **Claude 4.5**: `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
-- **Claude 3.5**: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
-- **Claude 3**: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
-- **Claude 2** (legacy): `claude-2.1`, `claude-2.0`
+```{r}
+result <- claudeR(
+  "Find edge cases in an R function that computes grouped weighted means.",
+  model = "opus",
+  thinking = list(type = "adaptive", display = "summarized"),
+  effort = "high",
+  return_thinking = TRUE,
+  max_tokens = 4000
+)
 
-## Parameters
+cat("Thinking summary:\n", result$thinking, "\n\n")
+cat("Answer:\n", result$response)
+```
 
-Key parameters for the `claudeR()` function:
+Do not use a fixed `budget_tokens` configuration with current adaptive models.
+Also leave `temperature`, `top_k`, and `top_p` as `NULL`; modern adaptive models
+reject non-default sampling values.
+
+## Fable 5 Refusals
+
+Fable 5 always uses adaptive thinking, so omit `thinking`; explicitly disabling
+thinking is invalid. A safety classifier can decline a Fable request with an
+HTTP 200 response and `stop_reason = "refusal"`. Request the structured response
+to distinguish a refusal from an empty answer:
+
+```{r}
+result <- claudeR(
+  "Plan a long-running research workflow.",
+  model = "fable",
+  effort = "high",
+  return_response = TRUE,
+  max_tokens = 4000
+)
+
+if (identical(result$stop_reason, "refusal")) {
+  detail <- result$stop_details$explanation
+  if (is.null(detail)) detail <- "Claude declined the request."
+  message(detail)
+} else {
+  cat(result$response)
+}
+```
+
+With `return_response = TRUE`, the result also includes content blocks, model,
+usage, stop sequence, and stop details. Without it, claudeR warns and returns
+`NULL` for a refusal.
+
+## Beta Headers and Fallbacks
+
+Supply Anthropic beta header names with `betas`. Additional named Messages API
+fields pass through `...`. This example uses the current server-side fallback
+beta to retry a Fable refusal with Opus 4.8:
+
+```{r}
+result <- claudeR(
+  "Analyze this difficult task.",
+  model = "fable",
+  return_response = TRUE,
+  betas = "server-side-fallback-2026-06-01",
+  fallbacks = list(list(model = "claude-opus-4-8"))
+)
+```
+
+Beta names and availability can change. Check Anthropic's current documentation
+before production use. Values nested in passthrough fields, such as a fallback
+model, must use full API IDs rather than claudeR shortcuts.
+
+## Streaming and Return Values
+
+`stream = TRUE` streams response text as it arrives. Use
+`return_thinking = TRUE` to return extracted thinking and response strings, or
+`return_response = TRUE` for content blocks and complete stop metadata. The
+historical `stream_thinking` argument remains as a compatibility alias.
+
+```{r}
+result <- claudeR(
+  "Explain how lexical scoping works in R.",
+  stream = TRUE,
+  return_response = TRUE
+)
+result$usage
+```
+
+## Main Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `prompt` | List of messages (Claude 3+) or string (Claude 2) | Required |
-| `model` | Model identifier | `"claude-sonnet-4-5-20250929"` |
-| `max_tokens` | Maximum tokens in response | `100` |
-| `temperature` | Randomness (0-1) | `0.7` |
-| `system_prompt` | System instructions | `NULL` |
-| `thinking` | Enable extended thinking | `NULL` |
-| `stream_thinking` | Stream output in real-time | `TRUE` |
-| `return_thinking` | Include thinking in output | `FALSE` |
+| `prompt` | One string or a non-empty list of message objects | required |
+| `model` | Full API model ID or claudeR shortcut | `"sonnet"` |
+| `max_tokens` | Maximum output tokens | `1024` |
+| `system_prompt` | Top-level system instructions | `NULL` |
+| `thinking` | Adaptive-thinking configuration | `NULL` |
+| `effort` | Reasoning effort under `output_config` | `NULL` |
+| `stream` | Stream the response | `FALSE` |
+| `return_thinking` | Return thinking and response strings | `FALSE` |
+| `return_response` | Return structured response and stop metadata | `FALSE` |
+| `betas` | Anthropic beta header names | `NULL` |
+| `...` | Additional named Messages API fields | none |
 
-## Error Handling
+API validation failures and non-success HTTP responses raise R errors. Fable
+classifier refusals are successful API responses and follow the special handling
+described above.
 
-If the API request fails, claudeR will return `NULL` and display a warning with
-error details. Common issues include:
+## Claude Code Model Selection
 
-- Invalid or missing API key
-- Exceeded rate limits
-- Invalid model name
-- Malformed prompt format
+`claude_code()` invokes the separately installed Claude Code CLI. Its `model`
+argument is passed verbatim as `--model`: it does not use claudeR's API shortcut
+resolver or API model validation. The CLI decides which aliases and model IDs are
+available from its own version, account access, and configuration.
+
+```{r}
+claude_code("Review the files in this repository", model = "opus")
+```
 
 ## Further Resources
 
-- [Anthropic API Documentation](https://docs.anthropic.com/)
-- [claudeR GitHub Repository](https://github.com/yrvelez/claudeR)
+- [Anthropic Models overview](https://platform.claude.com/docs/en/about-claude/models/overview)
+- [Model IDs and versioning](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)
+- [Anthropic API documentation](https://platform.claude.com/docs/en/api/overview)
+- [claudeR GitHub repository](https://github.com/yrvelez/claudeR)
