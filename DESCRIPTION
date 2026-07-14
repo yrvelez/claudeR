@@ -1,17 +1,15 @@
 Package: claudeR
 Title: Interact with the Anthropic Claude API
-Version: 0.1.0
+Version: 0.2.0
 Authors@R:
     person("Yamil", "Velez", , "yrv2004@columbia.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-5355-9950"))
-Description: A convenient interface to the Anthropic Claude API for generating
-    natural language responses using advanced machine learning models. Supports
-    Claude 2, Claude 3, and Claude 4 model families including features like
-    extended thinking mode and streaming responses. Also provides integration
-    with the Claude Code CLI for agentic coding workflows including file
-    operations, code execution, and multi-turn interactions. Allows users to
-    easily generate AI-powered text completions without managing API request
-    details.
+Description: A convenient interface to the Anthropic Claude Messages and Models
+    APIs, with support for model discovery, adaptive thinking, streaming,
+    structured response metadata, and forward-compatible request parameters.
+    Also integrates with the Claude Code command-line interface for agentic
+    coding workflows, including file operations, code execution, and multi-turn
+    interactions.
 License: MIT + file LICENSE
 URL: https://github.com/yrvelez/claudeR
 BugReports: https://github.com/yrvelez/claudeR/issues
@@ -30,5 +28,5 @@ Suggests:
 Config/testthat/edition: 3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.3
 VignetteBuilder: knitr
